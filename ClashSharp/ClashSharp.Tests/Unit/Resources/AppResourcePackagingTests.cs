@@ -98,7 +98,7 @@ public sealed class AppResourcePackagingTests
         Assert.Contains("x:Name=\"ProxyCoreBinaryText\"", settingsXaml, StringComparison.Ordinal);
     }
 
-    /// <summary>Verifies mainland China feature settings use a level selector instead of a binary switch.</summary>
+    /// <summary>Verifies mainland China feature settings split display level from URL blocking.</summary>
     [Fact]
     public void SettingsXaml_UsesMainlandChinaFeatureModeSelector()
     {
@@ -111,7 +111,8 @@ public sealed class AppResourcePackagingTests
         Assert.Contains("x:Name=\"MainlandChinaFlagOnlyItem\"", settingsXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"MainlandChinaFlagAndTextItem\"", settingsXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"MainlandChinaKeywordFilterItem\"", settingsXaml, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"MainlandChinaAllItem\"", settingsXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("x:Name=\"MainlandChinaAllItem\"", settingsXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"MainlandChinaUrlBlockingToggle\"", settingsXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("MainlandChinaDisplayToggle", settingsXaml, StringComparison.Ordinal);
     }
 

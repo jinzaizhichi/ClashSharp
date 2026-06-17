@@ -20,9 +20,11 @@ public sealed class MainlandChinaTextDisplayServiceTests
     public void Apply_AllIncludingUrlBlacklist_MasksSensitiveUrls()
     {
         MainlandChinaFeatureMode originalMode = AppSettingsService.Instance.MainlandChinaFeatureMode;
+        bool originalUrlBlocking = AppSettingsService.Instance.MainlandChinaUrlBlockingEnabled;
         try
         {
-            AppSettingsService.Instance.MainlandChinaFeatureMode = MainlandChinaFeatureMode.AllIncludingUrlBlacklist;
+            AppSettingsService.Instance.MainlandChinaFeatureMode = MainlandChinaFeatureMode.FlagReplacementOnly;
+            AppSettingsService.Instance.MainlandChinaUrlBlockingEnabled = true;
 
             string displayText = MainlandChinaTextDisplayService.Instance.Apply("https://pincong.rocks/topic/1");
 
@@ -31,6 +33,7 @@ public sealed class MainlandChinaTextDisplayServiceTests
         finally
         {
             AppSettingsService.Instance.MainlandChinaFeatureMode = originalMode;
+            AppSettingsService.Instance.MainlandChinaUrlBlockingEnabled = originalUrlBlocking;
         }
     }
 
@@ -39,9 +42,11 @@ public sealed class MainlandChinaTextDisplayServiceTests
     public void Apply_KeywordFilterOnly_DoesNotMaskSensitiveUrls()
     {
         MainlandChinaFeatureMode originalMode = AppSettingsService.Instance.MainlandChinaFeatureMode;
+        bool originalUrlBlocking = AppSettingsService.Instance.MainlandChinaUrlBlockingEnabled;
         try
         {
             AppSettingsService.Instance.MainlandChinaFeatureMode = MainlandChinaFeatureMode.FlagTextCompletionAndKeywordFilter;
+            AppSettingsService.Instance.MainlandChinaUrlBlockingEnabled = false;
 
             string displayText = MainlandChinaTextDisplayService.Instance.Apply("https://pincong.rocks/topic/1");
 
@@ -50,6 +55,7 @@ public sealed class MainlandChinaTextDisplayServiceTests
         finally
         {
             AppSettingsService.Instance.MainlandChinaFeatureMode = originalMode;
+            AppSettingsService.Instance.MainlandChinaUrlBlockingEnabled = originalUrlBlocking;
         }
     }
 

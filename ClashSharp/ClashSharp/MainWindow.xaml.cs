@@ -10,6 +10,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using ClashSharp.Model;
 using ClashSharp.Service;
 using ClashSharp.ViewModel;
 using Microsoft.UI;
@@ -51,6 +52,12 @@ public sealed partial class MainWindow : Window
     /// <summary>Bindable shell view model used by navigation controls.</summary>
     private readonly MainWindowViewModel _viewModel;
 
+    /// <summary>Current app window used for close interception.</summary>
+    private AppWindow? _appWindow;
+
+    /// <summary>True after the user confirms a proxy-active close prompt.</summary>
+    private bool _isCloseConfirmed;
+
     /// <summary>Initializes the main window, applies minimum size constraints, configures the title bar, and sets up navigation.</summary>
     public MainWindow()
     {
@@ -72,12 +79,13 @@ public sealed partial class MainWindow : Window
     private void InitializeTitleBar()
     {
         var windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
-        AppWindow appWindow = AppWindow.GetFromWindowId(windowId);
+        _appWindow = AppWindow.GetFromWindowId(windowId);
 
-        appWindow.TitleBar.ExtendsContentIntoTitleBar = true;
-        appWindow.TitleBar.ButtonBackgroundColor = Colors.Transparent;
-        appWindow.TitleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
-        appWindow.Title = "Clash#";
+        _appWindow.TitleBar.ExtendsContentIntoTitleBar = true;
+        _appWindow.TitleBar.ButtonBackgroundColor = Colors.Transparent;
+        _appWindow.TitleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
+        _appWindow.Title = "Clash#";
+        _appWindow.Closing += OnAppWindowClosing;
         SetTitleBar(AppTitleBar);
     }
 
@@ -123,6 +131,12 @@ public sealed partial class MainWindow : Window
     /// <param name="args">Window close event arguments. Not null.</param>
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
+        if (_appWindow is not null)
+        {
+            _appWindow.Closing -= OnAppWindowClosing;
+            _appWindow = null;
+        }
+
         _viewModel.Dispose();
         RuntimeShutdownService.Shutdown();
 
@@ -134,6 +148,42 @@ public sealed partial class MainWindow : Window
 
         _wndProcDelegate = null;
         _hWnd = 0;
+    }
+
+    /// <summary>Prompts when closing while proxy takeover is active.</summary>
+    /// <param name="sender">App window. Not null.</param>
+    /// <param name="args">Closing event arguments. Not null.</param>
+    private async void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        if (_isCloseConfirmed || !IsProxyTakeoverActive())
+        {
+            return;
+        }
+
+        args.Cancel = true;
+        ContentDialog dialog = new()
+        {
+            Title = LocalizationService.Instance.GetString("Close.ProxyActive.Title"),
+            Content = LocalizationService.Instance.GetString("Close.ProxyActive.Message"),
+            PrimaryButtonText = LocalizationService.Instance.GetString("Command.Close"),
+            CloseButtonText = LocalizationService.Instance.GetString("Command.Cancel"),
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = ContentFrame.XamlRoot,
+        };
+
+        if (await dialog.ShowAsync() is ContentDialogResult.Primary)
+        {
+            _isCloseConfirmed = true;
+            Close();
+        }
+    }
+
+    /// <summary>Returns whether a proxy takeover mode is currently active.</summary>
+    /// <returns>True when closing will stop active proxy routing.</returns>
+    private static bool IsProxyTakeoverActive()
+    {
+        ClashSharpMode currentMode = AppSettingsService.Instance.CurrentMode;
+        return currentMode is ClashSharpMode.RuleTakeover or ClashSharpMode.FullTakeover;
     }
 
     /// <summary>Creates the navigation tag to page-type mapping used by the shell view model.</summary>

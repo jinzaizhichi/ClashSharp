@@ -74,6 +74,35 @@ public sealed class AppSettingsService
     /// <summary>Storage key for mainland China feature mode.</summary>
     private const string KeyMainlandChinaFeatureMode = "MainlandChinaFeatureMode";
 
+    /// <summary>Storage key for mainland China URL blocking.</summary>
+    private const string KeyMainlandChinaUrlBlockingEnabled = "MainlandChinaUrlBlockingEnabled";
+
+    /// <summary>Storage key for proxy connection-test URL.</summary>
+    private const string KeyConnectionTestUrl = "ConnectionTestUrl";
+
+    /// <summary>Default proxy connection-test URL.</summary>
+    private const string DefaultConnectionTestUrl = "https://goole.com";
+
+    /// <summary>Settings keys owned by this service.</summary>
+    private static readonly string[] KnownKeys =
+    [
+        KeyDisplayLanguage,
+        KeyCurrentMode,
+        KeyActiveProfileId,
+        KeyTransparentProxyEnabled,
+        KeyMixedPort,
+        KeyConnectionSamplingEnabled,
+        KeyConnectionSamplingIntervalSeconds,
+        KeyFallbackToSystemProxyWhenTunFails,
+        KeyRestoreProxyOnExit,
+        KeyCheckStaleProxyOnStartup,
+        KeyProxyRecoveryMode,
+        KeyMainlandChinaDisplayEnabled,
+        KeyMainlandChinaFeatureMode,
+        KeyMainlandChinaUrlBlockingEnabled,
+        KeyConnectionTestUrl,
+    ];
+
     /// <summary>Initializes the settings service and resolves the preferred storage container.</summary>
     private AppSettingsService()
     {
@@ -195,14 +224,49 @@ public sealed class AppSettingsService
             MainlandChinaFeatureMode defaultMode = GetBoolean(KeyMainlandChinaDisplayEnabled, true)
                 ? MainlandChinaFeatureMode.FlagTextCompletionAndKeywordFilter
                 : MainlandChinaFeatureMode.Disabled;
-            return GetEnum(KeyMainlandChinaFeatureMode, defaultMode);
+            MainlandChinaFeatureMode mode = GetEnum(KeyMainlandChinaFeatureMode, defaultMode);
+            return mode == MainlandChinaFeatureMode.AllIncludingUrlBlacklist
+                ? MainlandChinaFeatureMode.FlagTextCompletionAndKeywordFilter
+                : mode;
         }
 
         set
         {
-            SetEnum(KeyMainlandChinaFeatureMode, value);
-            SetBoolean(KeyMainlandChinaDisplayEnabled, value != MainlandChinaFeatureMode.Disabled);
+            MainlandChinaFeatureMode persistedMode = value == MainlandChinaFeatureMode.AllIncludingUrlBlacklist
+                ? MainlandChinaFeatureMode.FlagTextCompletionAndKeywordFilter
+                : value;
+            SetEnum(KeyMainlandChinaFeatureMode, persistedMode);
+            SetBoolean(KeyMainlandChinaDisplayEnabled, persistedMode != MainlandChinaFeatureMode.Disabled);
         }
+    }
+
+    /// <summary>Gets or sets whether mainland China URL blocking is enabled.</summary>
+    /// <value>True when CCP-unfriendly URLs are masked in UI text; defaults to false.</value>
+    public bool MainlandChinaUrlBlockingEnabled
+    {
+        get
+        {
+            lock (_syncLock)
+            {
+                if (GetValue(KeyMainlandChinaFeatureMode) is int value
+                    && value == (int)MainlandChinaFeatureMode.AllIncludingUrlBlacklist)
+                {
+                    return true;
+                }
+            }
+
+            return GetBoolean(KeyMainlandChinaUrlBlockingEnabled, false);
+        }
+
+        set => SetBoolean(KeyMainlandChinaUrlBlockingEnabled, value);
+    }
+
+    /// <summary>Gets or sets the URL used for proxy connection tests.</summary>
+    /// <value>Absolute HTTP/HTTPS URL; defaults to https://goole.com.</value>
+    public string ConnectionTestUrl
+    {
+        get => GetString(KeyConnectionTestUrl, DefaultConnectionTestUrl);
+        set => SetString(KeyConnectionTestUrl, NormalizeConnectionTestUrl(value));
     }
 
     /// <summary>Gets or sets whether mainland China display replacement is enabled.</summary>
@@ -213,6 +277,18 @@ public sealed class AppSettingsService
         set => MainlandChinaFeatureMode = value
             ? MainlandChinaFeatureMode.FlagTextCompletionAndKeywordFilter
             : MainlandChinaFeatureMode.Disabled;
+    }
+
+    /// <summary>Removes all persisted settings owned by Clash#, restoring default values on subsequent reads.</summary>
+    public void ResetAllSettings()
+    {
+        lock (_syncLock)
+        {
+            foreach (string key in KnownKeys)
+            {
+                RemoveValue(key);
+            }
+        }
     }
 
     /// <summary>Reads a boolean setting from storage or returns <paramref name="defaultValue"/>.</summary>
@@ -374,6 +450,49 @@ public sealed class AppSettingsService
         }
 
         _fallbackValues[key] = value;
+    }
+
+    /// <summary>Removes a raw setting value from the preferred backing store.</summary>
+    /// <param name="key">Storage key. Must not be null.</param>
+    private void RemoveValue(string key)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+
+        if (_localSettings is not null)
+        {
+            _localSettings.Values.Remove(key);
+        }
+
+        _fallbackValues.Remove(key);
+    }
+
+    /// <summary>Normalizes a user-entered HTTP/HTTPS connection test URL.</summary>
+    /// <param name="value">User-entered URL. Must not be null.</param>
+    /// <returns>Normalized absolute URL.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="value"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="value"/> is not an HTTP or HTTPS URL.</exception>
+    private static string NormalizeConnectionTestUrl(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+
+        string trimmedValue = value.Trim();
+        if (string.IsNullOrWhiteSpace(trimmedValue))
+        {
+            return DefaultConnectionTestUrl;
+        }
+
+        if (!trimmedValue.Contains("://", StringComparison.Ordinal))
+        {
+            trimmedValue = $"https://{trimmedValue}";
+        }
+
+        if (!Uri.TryCreate(trimmedValue, UriKind.Absolute, out Uri? uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new ArgumentException("Connection test URL must be an absolute HTTP or HTTPS URL.", nameof(value));
+        }
+
+        return uri.ToString().TrimEnd('/');
     }
 
     /// <summary>Attempts to resolve the Windows application local settings container.</summary>

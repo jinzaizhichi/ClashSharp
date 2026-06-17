@@ -22,6 +22,9 @@
             PaneDisplayMode="Auto"
             OpenPaneLength="260"
             SelectionChanged="OnNavigationSelectionChanged">
+            <NavigationView.Resources>
+                <CornerRadius x:Key="NavigationViewContentGridCornerRadius">0</CornerRadius>
+            </NavigationView.Resources>
 
             <NavigationView.PaneHeader>
                 <StackPanel Orientation="Horizontal" Spacing="10" Margin="12,8,12,8">

@@ -42,6 +42,10 @@ internal interface ISettingsStore
     ProxyRecoveryMode ProxyRecoveryMode { get; set; }
 
     MainlandChinaFeatureMode MainlandChinaFeatureMode { get; set; }
+
+    bool MainlandChinaUrlBlockingEnabled { get; set; }
+
+    string ConnectionTestUrl { get; set; }
 }
 
 /// <summary>Immutable proxy information snapshot used by <see cref="SettingsViewModel"/>.</summary>
@@ -129,6 +133,18 @@ internal sealed class AppSettingsStore : ISettingsStore
     {
         get => _settings.MainlandChinaFeatureMode;
         set => _settings.MainlandChinaFeatureMode = value;
+    }
+
+    public bool MainlandChinaUrlBlockingEnabled
+    {
+        get => _settings.MainlandChinaUrlBlockingEnabled;
+        set => _settings.MainlandChinaUrlBlockingEnabled = value;
+    }
+
+    public string ConnectionTestUrl
+    {
+        get => _settings.ConnectionTestUrl;
+        set => _settings.ConnectionTestUrl = value;
     }
 }
 
@@ -233,6 +249,10 @@ internal sealed class SettingsViewModel : ObservableObject
 
     public string MixedPortDescriptionText => _getString("Settings.MixedPort.Description");
 
+    public string ConnectionTestUrlTitleText => _getString("Settings.ConnectionTestUrl.Title");
+
+    public string ConnectionTestUrlDescriptionText => _getString("Settings.ConnectionTestUrl.Description");
+
     public string ProxyInformationTitleText => _getString("Settings.ProxyInformation.Title");
 
     public string ProxyInformationDescriptionText => _getString("Settings.ProxyInformation.Description");
@@ -269,6 +289,8 @@ internal sealed class SettingsViewModel : ObservableObject
 
     public string WindowsNativeDescriptionText => _getString("Settings.WindowsNative.Description");
 
+    public string OpenText => _getString("Command.Open");
+
     public string WslDiagnosticTitleText => _getString("Settings.Wsl.Title");
 
     public string TerminalDiagnosticTitleText => _getString("Settings.Terminal.Title");
@@ -280,6 +302,8 @@ internal sealed class SettingsViewModel : ObservableObject
     public string ApplyText => _getString("Command.Apply");
 
     public string ResetText => _getString("Command.Reset");
+
+    public string CleanupText => _getString("Command.Cleanup");
 
     public string DiagnosticNotRunText => _getString("Diagnostic.NotRun");
 
@@ -335,6 +359,20 @@ internal sealed class SettingsViewModel : ObservableObject
 
     public string MainlandChinaAllText => _getString("Settings.MainlandChinaFeature.All");
 
+    public string MainlandChinaUrlBlockingTitleText => _getString("Settings.MainlandChinaUrlBlocking.Title");
+
+    public string MainlandChinaUrlBlockingDescriptionText => _getString("Settings.MainlandChinaUrlBlocking.Description");
+
+    public string DataSectionTitleText => _getString("Settings.Section.Data");
+
+    public string ResetAllSettingsTitleText => _getString("Settings.ResetAllSettings.Title");
+
+    public string ResetAllSettingsDescriptionText => _getString("Settings.ResetAllSettings.Description");
+
+    public string ClearAllDataTitleText => _getString("Settings.ClearAllData.Title");
+
+    public string ClearAllDataDescriptionText => _getString("Settings.ClearAllData.Description");
+
     /// <summary>Backing field for <see cref="DisplayLanguage"/>.</summary>
     private AppLanguage _displayLanguage;
 
@@ -364,6 +402,12 @@ internal sealed class SettingsViewModel : ObservableObject
 
     /// <summary>Backing field for <see cref="MainlandChinaFeatureMode"/>.</summary>
     private MainlandChinaFeatureMode _mainlandChinaFeatureMode;
+
+    /// <summary>Backing field for <see cref="MainlandChinaUrlBlockingEnabled"/>.</summary>
+    private bool _mainlandChinaUrlBlockingEnabled;
+
+    /// <summary>Backing field for <see cref="ConnectionTestUrl"/>.</summary>
+    private string _connectionTestUrl = string.Empty;
 
     /// <summary>Backing field for <see cref="ProxyLocalEntryText"/>.</summary>
     private string _proxyLocalEntryText = string.Empty;
@@ -505,6 +549,18 @@ internal sealed class SettingsViewModel : ObservableObject
         set => SetMainlandChinaFeatureModeIndex(value);
     }
 
+    public bool MainlandChinaUrlBlockingEnabled
+    {
+        get => _mainlandChinaUrlBlockingEnabled;
+        set => SetMainlandChinaUrlBlockingEnabled(value);
+    }
+
+    public string ConnectionTestUrl
+    {
+        get => _connectionTestUrl;
+        private set => SetProperty(ref _connectionTestUrl, value);
+    }
+
     /// <summary>Loads the latest persisted settings into the view model properties.</summary>
     public void Load()
     {
@@ -518,6 +574,8 @@ internal sealed class SettingsViewModel : ObservableObject
         SetProperty(ref _restoreProxyOnExit, _settings.RestoreProxyOnExit, nameof(RestoreProxyOnExit));
         ProxyRecoveryMode = _settings.ProxyRecoveryMode;
         MainlandChinaFeatureMode = _settings.MainlandChinaFeatureMode;
+        SetProperty(ref _mainlandChinaUrlBlockingEnabled, _settings.MainlandChinaUrlBlockingEnabled, nameof(MainlandChinaUrlBlockingEnabled));
+        ConnectionTestUrl = _settings.ConnectionTestUrl;
         RefreshProxyInformation();
     }
 
@@ -558,6 +616,8 @@ internal sealed class SettingsViewModel : ObservableObject
             nameof(TunFallbackDescriptionText),
             nameof(MixedPortTitleText),
             nameof(MixedPortDescriptionText),
+            nameof(ConnectionTestUrlTitleText),
+            nameof(ConnectionTestUrlDescriptionText),
             nameof(ProxyInformationTitleText),
             nameof(ProxyInformationDescriptionText),
             nameof(ProxyLocalEntryText),
@@ -570,12 +630,14 @@ internal sealed class SettingsViewModel : ObservableObject
             nameof(WindowsNativeSectionTitleText),
             nameof(WindowsNativeTitleText),
             nameof(WindowsNativeDescriptionText),
+            nameof(OpenText),
             nameof(WslDiagnosticTitleText),
             nameof(TerminalDiagnosticTitleText),
             nameof(StoreDiagnosticTitleText),
             nameof(DiagnoseText),
             nameof(ApplyText),
             nameof(ResetText),
+            nameof(CleanupText),
             nameof(DiagnosticNotRunText),
             nameof(WslDiagnosticStatusText),
             nameof(TerminalDiagnosticStatusText),
@@ -597,6 +659,13 @@ internal sealed class SettingsViewModel : ObservableObject
             nameof(MainlandChinaFlagAndTextText),
             nameof(MainlandChinaKeywordFilterText),
             nameof(MainlandChinaAllText),
+            nameof(MainlandChinaUrlBlockingTitleText),
+            nameof(MainlandChinaUrlBlockingDescriptionText),
+            nameof(DataSectionTitleText),
+            nameof(ResetAllSettingsTitleText),
+            nameof(ResetAllSettingsDescriptionText),
+            nameof(ClearAllDataTitleText),
+            nameof(ClearAllDataDescriptionText),
         ];
 
         foreach (string propertyName in propertyNames)
@@ -792,8 +861,49 @@ internal sealed class SettingsViewModel : ObservableObject
         }
 
         MainlandChinaFeatureMode mode = (MainlandChinaFeatureMode)index;
+        if (mode == MainlandChinaFeatureMode.AllIncludingUrlBlacklist)
+        {
+            mode = MainlandChinaFeatureMode.FlagTextCompletionAndKeywordFilter;
+        }
+
         _settings.MainlandChinaFeatureMode = mode;
         MainlandChinaFeatureMode = mode;
+        return true;
+    }
+
+    /// <summary>Persists the mainland China URL blocking switch.</summary>
+    /// <param name="isEnabled">Switch value.</param>
+    public void SetMainlandChinaUrlBlockingEnabled(bool isEnabled)
+    {
+        _settings.MainlandChinaUrlBlockingEnabled = isEnabled;
+        SetProperty(ref _mainlandChinaUrlBlockingEnabled, isEnabled, nameof(MainlandChinaUrlBlockingEnabled));
+    }
+
+    /// <summary>Persists the proxy connection-test URL.</summary>
+    /// <param name="value">User-entered URL.</param>
+    /// <returns>True when the value was valid and persisted; otherwise false.</returns>
+    public bool SetConnectionTestUrl(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        string normalizedValue = value.Trim();
+        if (!normalizedValue.Contains("://", StringComparison.Ordinal))
+        {
+            normalizedValue = $"https://{normalizedValue}";
+        }
+
+        if (!Uri.TryCreate(normalizedValue, UriKind.Absolute, out Uri? uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            return false;
+        }
+
+        string persistedValue = uri.ToString().TrimEnd('/');
+        _settings.ConnectionTestUrl = persistedValue;
+        ConnectionTestUrl = persistedValue;
         return true;
     }
 }

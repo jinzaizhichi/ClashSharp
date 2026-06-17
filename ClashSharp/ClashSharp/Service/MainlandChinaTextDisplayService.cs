@@ -82,7 +82,7 @@ public sealed class MainlandChinaTextDisplayService
             return text;
         }
 
-        if (featureMode >= MainlandChinaFeatureMode.AllIncludingUrlBlacklist && ContainsSensitiveUrl(text))
+        if (AppSettingsService.Instance.MainlandChinaUrlBlockingEnabled && ContainsSensitiveUrl(text))
         {
             return "***";
         }

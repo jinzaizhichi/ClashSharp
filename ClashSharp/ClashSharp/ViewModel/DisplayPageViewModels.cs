@@ -12,9 +12,11 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using ClashSharp.Model;
+using Windows.ApplicationModel;
 
 namespace ClashSharp.ViewModel;
 
@@ -479,6 +481,14 @@ internal sealed class AboutViewModel : ObservableObject
     /// <value>Localized app description.</value>
     public string AppDescriptionText => _localization.GetString("About.App.Description");
 
+    /// <summary>Gets the application name text.</summary>
+    /// <value>Application display name.</value>
+    public string AppNameText => "Clash#";
+
+    /// <summary>Gets the application version text.</summary>
+    /// <value>Application package or assembly version.</value>
+    public string VersionText => GetVersionText();
+
     /// <summary>Gets the author title text.</summary>
     /// <value>Localized author title.</value>
     public string AuthorTitleText => _localization.GetString("About.Author.Title");
@@ -494,6 +504,14 @@ internal sealed class AboutViewModel : ObservableObject
     /// <summary>Gets the open-source description text.</summary>
     /// <value>Localized open-source description.</value>
     public string OpenSourceDescriptionText => _localization.GetString("About.OpenSource.Description");
+
+    /// <summary>Gets the protocol title text.</summary>
+    /// <value>Localized protocol title.</value>
+    public string ProtocolTitleText => _localization.GetString("About.Protocol.Title");
+
+    /// <summary>Gets the protocol value text.</summary>
+    /// <value>Localized protocol value.</value>
+    public string ProtocolValueText => _localization.GetString("About.Protocol.Value");
 
     /// <summary>Gets the GitHub title text.</summary>
     /// <value>Localized GitHub title.</value>
@@ -556,6 +574,21 @@ internal sealed class AboutViewModel : ObservableObject
         catch (Exception exception) when (exception is FileNotFoundException or InvalidOperationException or OperationCanceledException)
         {
             MihomoStatusText = _localization.GetString("About.Mihomo.Unavailable");
+        }
+    }
+
+    /// <summary>Resolves the current application version for display.</summary>
+    /// <returns>Package version when available; otherwise assembly version.</returns>
+    private static string GetVersionText()
+    {
+        try
+        {
+            PackageVersion version = Package.Current.Id.Version;
+            return $"{version.Major}.{version.Minor}.{version.Build}.{version.Revision}";
+        }
+        catch (InvalidOperationException)
+        {
+            return Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0.0.0";
         }
     }
 }

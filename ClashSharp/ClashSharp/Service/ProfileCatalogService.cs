@@ -328,6 +328,15 @@ public sealed class ProfileCatalogService
         }
     }
 
+    /// <summary>Forgets the cached catalog after local profile data has been deleted externally.</summary>
+    internal void ResetAfterDataDeletion()
+    {
+        lock (_syncLock)
+        {
+            _cachedDocument = null;
+        }
+    }
+
     /// <summary>Creates the shared HTTP client used for subscription operations.</summary>
     /// <returns>Configured HTTP client instance.</returns>
     private static HttpClient CreateHttpClient()

@@ -31,6 +31,8 @@ public sealed class SettingsViewModelTests
             RestoreProxyOnExit = false,
             ProxyRecoveryMode = ProxyRecoveryMode.EnableProxy,
             MainlandChinaFeatureMode = MainlandChinaFeatureMode.AllIncludingUrlBlacklist,
+            MainlandChinaUrlBlockingEnabled = true,
+            ConnectionTestUrl = "https://example.com/generate_204",
         };
 
         SettingsViewModel viewModel = new(store, _ => { }, () => { });
@@ -50,6 +52,8 @@ public sealed class SettingsViewModelTests
         Assert.Equal((int)ProxyRecoveryMode.EnableProxy, viewModel.ProxyRecoveryModeIndex);
         Assert.Equal(MainlandChinaFeatureMode.AllIncludingUrlBlacklist, viewModel.MainlandChinaFeatureMode);
         Assert.Equal((int)MainlandChinaFeatureMode.AllIncludingUrlBlacklist, viewModel.MainlandChinaFeatureModeIndex);
+        Assert.True(viewModel.MainlandChinaUrlBlockingEnabled);
+        Assert.Equal("https://example.com/generate_204", viewModel.ConnectionTestUrl);
     }
 
     /// <summary>Verifies language selection persists and notifies the shell language controller.</summary>
@@ -152,7 +156,7 @@ public sealed class SettingsViewModelTests
     /// <summary>Verifies mainland China feature mode selection persists only valid enum indexes.</summary>
     [Theory]
     [InlineData((int)MainlandChinaFeatureMode.Disabled, MainlandChinaFeatureMode.Disabled, true)]
-    [InlineData((int)MainlandChinaFeatureMode.AllIncludingUrlBlacklist, MainlandChinaFeatureMode.AllIncludingUrlBlacklist, true)]
+    [InlineData((int)MainlandChinaFeatureMode.AllIncludingUrlBlacklist, MainlandChinaFeatureMode.FlagTextCompletionAndKeywordFilter, true)]
     [InlineData(-1, MainlandChinaFeatureMode.FlagTextCompletionAndKeywordFilter, false)]
     [InlineData(100, MainlandChinaFeatureMode.FlagTextCompletionAndKeywordFilter, false)]
     public void SetMainlandChinaFeatureModeIndex_ValidatesAndPersists(
@@ -172,6 +176,38 @@ public sealed class SettingsViewModelTests
         Assert.Equal(expectedMode, store.MainlandChinaFeatureMode);
         Assert.Equal(expectedMode, viewModel.MainlandChinaFeatureMode);
         Assert.Equal((int)expectedMode, viewModel.MainlandChinaFeatureModeIndex);
+    }
+
+    /// <summary>Verifies mainland China URL blocking is persisted independently from the display mode combo box.</summary>
+    [Fact]
+    public void MainlandChinaUrlBlockingEnabled_Setter_PersistsSwitchOnly()
+    {
+        FakeSettingsStore store = new()
+        {
+            MainlandChinaFeatureMode = MainlandChinaFeatureMode.FlagReplacementOnly,
+            MainlandChinaUrlBlockingEnabled = false,
+        };
+        SettingsViewModel viewModel = new(store, _ => { }, () => { });
+
+        viewModel.MainlandChinaUrlBlockingEnabled = true;
+
+        Assert.True(store.MainlandChinaUrlBlockingEnabled);
+        Assert.True(viewModel.MainlandChinaUrlBlockingEnabled);
+        Assert.Equal(MainlandChinaFeatureMode.FlagReplacementOnly, store.MainlandChinaFeatureMode);
+    }
+
+    /// <summary>Verifies connection test URL input persists non-empty normalized text.</summary>
+    [Fact]
+    public void SetConnectionTestUrl_PersistsNonEmptyUrl()
+    {
+        FakeSettingsStore store = new() { ConnectionTestUrl = "https://goole.com" };
+        SettingsViewModel viewModel = new(store, _ => { }, () => { });
+
+        bool changed = viewModel.SetConnectionTestUrl(" example.com/generate_204 ");
+
+        Assert.True(changed);
+        Assert.Equal("https://example.com/generate_204", store.ConnectionTestUrl);
+        Assert.Equal("https://example.com/generate_204", viewModel.ConnectionTestUrl);
     }
 
     private sealed class FakeSettingsStore : ISettingsStore
@@ -195,5 +231,9 @@ public sealed class SettingsViewModelTests
         public ProxyRecoveryMode ProxyRecoveryMode { get; set; } = ProxyRecoveryMode.DisableProxy;
 
         public MainlandChinaFeatureMode MainlandChinaFeatureMode { get; set; } = MainlandChinaFeatureMode.FlagTextCompletionAndKeywordFilter;
+
+        public bool MainlandChinaUrlBlockingEnabled { get; set; }
+
+        public string ConnectionTestUrl { get; set; } = "https://goole.com";
     }
 }

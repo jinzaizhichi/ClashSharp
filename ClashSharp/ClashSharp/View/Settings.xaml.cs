@@ -13,6 +13,7 @@ using ClashSharp.Service;
 using ClashSharp.ViewModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Data;
 
 namespace ClashSharp.View;
 
@@ -49,6 +50,183 @@ public sealed partial class Settings : Page
     private void LoadSettings()
     {
         _viewModel.Load();
+    }
+
+    /// <summary>Persists the connection test URL when the input loses focus.</summary>
+    /// <param name="sender">URL text box. Not null.</param>
+    /// <param name="e">Routed event arguments. Not null.</param>
+    private void ConnectionTestUrlBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!_viewModel.SetConnectionTestUrl(ConnectionTestUrlBox.Text))
+        {
+            ConnectionTestUrlBox.Text = _viewModel.ConnectionTestUrl;
+        }
+    }
+
+    /// <summary>Opens the Windows-native network repair dialog.</summary>
+    /// <param name="sender">Clicked button. Not null.</param>
+    /// <param name="e">Routed event arguments. Not null.</param>
+    private async void OpenNetworkRepairButton_Click(object sender, RoutedEventArgs e)
+    {
+        ContentDialog dialog = new()
+        {
+            Title = _viewModel.WindowsNativeTitleText,
+            Content = BuildNetworkRepairPanel(),
+            CloseButtonText = LocalizationService.Instance.GetString("Command.Close"),
+            XamlRoot = XamlRoot,
+        };
+
+        await dialog.ShowAsync();
+    }
+
+    /// <summary>Builds the network repair dialog content.</summary>
+    /// <returns>Dialog content panel.</returns>
+    private StackPanel BuildNetworkRepairPanel()
+    {
+        StackPanel panel = new()
+        {
+            Spacing = 8,
+            MinWidth = 560,
+        };
+
+        AddDiagnosticRow(panel, _viewModel.WslDiagnosticTitleText, nameof(SettingsViewModel.WslDiagnosticStatusText), "Wsl");
+        AddDiagnosticRow(panel, _viewModel.TerminalDiagnosticTitleText, nameof(SettingsViewModel.TerminalDiagnosticStatusText), "Terminal");
+        AddDiagnosticRow(panel, _viewModel.StoreDiagnosticTitleText, nameof(SettingsViewModel.StoreDiagnosticStatusText), "MicrosoftStore");
+
+        return panel;
+    }
+
+    /// <summary>Adds one diagnostic target row to the dialog panel.</summary>
+    /// <param name="panel">Target panel. Must not be null.</param>
+    /// <param name="title">Target title. Must not be null.</param>
+    /// <param name="statusPropertyName">Bindable status property name. Must not be null.</param>
+    /// <param name="targetTag">Diagnostic target tag. Must not be null.</param>
+    private void AddDiagnosticRow(StackPanel panel, string title, string statusPropertyName, string targetTag)
+    {
+        Grid row = new()
+        {
+            Style = (Style)Application.Current.Resources["ClashCardGridStyle"],
+            MinHeight = 68,
+            ColumnSpacing = 8,
+        };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        StackPanel textPanel = new()
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            Spacing = 2,
+        };
+        textPanel.Children.Add(new TextBlock
+        {
+            Text = title,
+            Style = (Style)Application.Current.Resources["BodyTextBlockStyle"],
+        });
+
+        TextBlock statusText = new()
+        {
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+        };
+        statusText.SetBinding(TextBlock.TextProperty, new Binding { Path = new PropertyPath(statusPropertyName) });
+        textPanel.Children.Add(statusText);
+        row.Children.Add(textPanel);
+
+        AddDiagnosticButton(row, 1, "\uE9D9", _viewModel.DiagnoseText, $"{targetTag}:Diagnose");
+        AddDiagnosticButton(row, 2, "\uE73E", _viewModel.ApplyText, $"{targetTag}:Apply");
+        AddDiagnosticButton(row, 3, "\uE72C", _viewModel.ResetText, $"{targetTag}:Reset");
+
+        panel.Children.Add(row);
+    }
+
+    /// <summary>Adds one command button to a diagnostic row.</summary>
+    private void AddDiagnosticButton(Grid row, int column, string glyph, string text, string commandParameter)
+    {
+        Button button = new()
+        {
+            Command = _viewModel.WindowsDiagnosticCommand,
+            CommandParameter = commandParameter,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(button, column);
+
+        StackPanel content = new()
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+        };
+        content.Children.Add(new FontIcon { Glyph = glyph, FontSize = 14 });
+        content.Children.Add(new TextBlock { Text = text });
+        button.Content = content;
+
+        row.Children.Add(button);
+    }
+
+    /// <summary>Shows a one-step confirmation and restores all settings to defaults.</summary>
+    private async void ResetAllSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        ContentDialog dialog = new()
+        {
+            Title = LocalizationService.Instance.GetString("Settings.ResetAllSettings.Title"),
+            Content = LocalizationService.Instance.GetString("Settings.ResetAllSettings.Confirm"),
+            PrimaryButtonText = _viewModel.ResetText,
+            CloseButtonText = LocalizationService.Instance.GetString("Command.Cancel"),
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot,
+        };
+
+        if (await dialog.ShowAsync() is not ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        AppDataMaintenanceService.ResetAllSettings();
+        LocalizationService.Instance.CurrentLanguage = AppSettingsService.Instance.DisplayLanguage;
+        _viewModel.SetDisplayLanguageIndex((int)AppSettingsService.Instance.DisplayLanguage);
+        _viewModel.Load();
+        ConnectionTestUrlBox.Text = _viewModel.ConnectionTestUrl;
+    }
+
+    /// <summary>Shows a two-step confirmation and clears all local application data.</summary>
+    private async void ClearAllDataButton_Click(object sender, RoutedEventArgs e)
+    {
+        ContentDialog firstDialog = new()
+        {
+            Title = LocalizationService.Instance.GetString("Settings.ClearAllData.Title"),
+            Content = LocalizationService.Instance.GetString("Settings.ClearAllData.Confirm"),
+            PrimaryButtonText = _viewModel.CleanupText,
+            CloseButtonText = LocalizationService.Instance.GetString("Command.Cancel"),
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot,
+        };
+
+        if (await firstDialog.ShowAsync() is not ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        ContentDialog secondDialog = new()
+        {
+            Title = LocalizationService.Instance.GetString("Settings.ClearAllData.SecondConfirm.Title"),
+            Content = LocalizationService.Instance.GetString("Settings.ClearAllData.SecondConfirm"),
+            PrimaryButtonText = _viewModel.CleanupText,
+            CloseButtonText = LocalizationService.Instance.GetString("Command.Cancel"),
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot,
+        };
+
+        if (await secondDialog.ShowAsync() is not ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        AppDataMaintenanceService.ClearAllData();
+        LocalizationService.Instance.CurrentLanguage = AppSettingsService.Instance.DisplayLanguage;
+        _viewModel.SetDisplayLanguageIndex((int)AppSettingsService.Instance.DisplayLanguage);
+        _viewModel.Load();
+        ConnectionTestUrlBox.Text = _viewModel.ConnectionTestUrl;
     }
 
 }

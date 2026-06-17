@@ -616,6 +616,15 @@ public sealed class LogStorageService
         }
     }
 
+    /// <summary>Forgets schema initialization after the database file has been deleted externally.</summary>
+    internal void ResetAfterDataDeletion()
+    {
+        lock (_syncLock)
+        {
+            _isInitialized = false;
+        }
+    }
+
     /// <summary>Ensures the SQLite database schema exists before any data operation runs.</summary>
     private void EnsureInitialized()
     {
