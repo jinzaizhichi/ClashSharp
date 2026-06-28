@@ -15,33 +15,45 @@ using Microsoft.Windows.AppNotifications.Builder;
 
 namespace ClashSharp.Service;
 
+/// <summary>Notification commands needed by application actions.</summary>
+internal interface IApplicationNotificationSink
+{
+    /// <summary>Sends a notification after the proxy mode changes.</summary>
+    void NotifyProxyModeChanged(ClashSharpMode mode);
+
+    /// <summary>Sends a custom user-visible notification.</summary>
+    void NotifyCustom(string message);
+}
+
 /// <summary>Win11 notification gateway with policy filtering.</summary>
-internal sealed class NotificationService
+internal sealed class NotificationService : ITriggerNotificationSink, IApplicationNotificationSink
 {
     public static NotificationService Instance { get; } = new(
         () => AppSettingsService.Instance.NotificationEnabled,
         () => AppSettingsService.Instance.NotificationLevel,
         LocalizationService.Instance.GetString,
-        LogStorageService.Instance.AppendLog);
+        LogStorageService.Instance.AppendLog,
+        TriggerRuntimeEventHub.Instance);
 
     private readonly Func<bool> _getEnabled;
     private readonly Func<NotificationLevel> _getLevel;
     private readonly Func<string, string> _getString;
     private readonly Action<string, string, string, string?> _appendLog;
+    private readonly ITriggerRuntimeEventPublisher _triggerEvents;
 
     internal NotificationService(
         Func<bool> getEnabled,
         Func<NotificationLevel> getLevel,
         Func<string, string> getString,
-        Action<string, string, string, string?> appendLog)
+        Action<string, string, string, string?> appendLog,
+        ITriggerRuntimeEventPublisher triggerEvents)
     {
         _getEnabled = getEnabled ?? throw new ArgumentNullException(nameof(getEnabled));
         _getLevel = getLevel ?? throw new ArgumentNullException(nameof(getLevel));
         _getString = getString ?? throw new ArgumentNullException(nameof(getString));
         _appendLog = appendLog ?? throw new ArgumentNullException(nameof(appendLog));
+        _triggerEvents = triggerEvents ?? throw new ArgumentNullException(nameof(triggerEvents));
     }
-
-    public event EventHandler<NotificationRaisedEventArgs>? NotificationRaised;
 
     public void NotifyProxyModeChanged(ClashSharpMode mode)
     {
@@ -91,7 +103,7 @@ internal sealed class NotificationService
                 .BuildNotification();
             AppNotificationManager.Default.Show(notification);
             AppendNotificationLog("Info", GetString("Notification.Log.Shown"), title, message);
-            NotificationRaised?.Invoke(this, new NotificationRaisedEventArgs(minimumLevel, title, message));
+            _triggerEvents.Publish(new TriggerRuntimeEvent(TriggerEventKind.NotificationRaised, minimumLevel));
         }
         catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException)
         {
@@ -146,5 +158,3 @@ internal sealed class NotificationService
         return _getString(key);
     }
 }
-
-internal sealed record NotificationRaisedEventArgs(NotificationLevel Level, string Title, string Message);

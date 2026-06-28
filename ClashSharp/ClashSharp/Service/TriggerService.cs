@@ -18,6 +18,13 @@ using ClashSharp.Model;
 
 namespace ClashSharp.Service;
 
+/// <summary>Notification commands required by trigger execution.</summary>
+internal interface ITriggerNotificationSink
+{
+    /// <summary>Sends a notification after one trigger task fires.</summary>
+    void NotifyTriggerFired(string triggerName);
+}
+
 /// <summary>Persistent trigger task service.</summary>
 internal sealed class TriggerService
 {
@@ -27,22 +34,26 @@ internal sealed class TriggerService
 
     private readonly string _storagePath;
     private readonly IApplicationActionDispatcher _actions;
-    private readonly NotificationService _notifications;
+    private readonly ITriggerNotificationSink _notifications;
+    private readonly ITriggerRuntimeEventSource _runtimeEvents;
     private readonly Action<string, string, string, string?> _appendLog;
     private readonly Func<string, string> _getString;
+    private readonly Func<TriggerRuntimeEvent, TriggerEvaluationContext> _createEvaluationContext;
     private readonly Func<bool> _getTriggersEnabled;
     private readonly Action<bool> _setTriggersEnabled;
     private readonly Func<bool> _getTriggerNotificationsEnabled;
     private readonly object _syncLock = new();
     private List<TriggerTask> _tasks = [];
-    private int _notificationEvaluationActive;
+    private int _runtimeEventEvaluationActive;
 
     public TriggerService(
         string storagePath,
         IApplicationActionDispatcher actions,
-        NotificationService notifications,
+        ITriggerNotificationSink notifications,
+        ITriggerRuntimeEventSource runtimeEvents,
         Action<string, string, string, string?> appendLog,
         Func<string, string>? getString = null,
+        Func<TriggerRuntimeEvent, TriggerEvaluationContext>? createEvaluationContext = null,
         Func<bool>? getTriggersEnabled = null,
         Action<bool>? setTriggersEnabled = null,
         Func<bool>? getTriggerNotificationsEnabled = null)
@@ -51,13 +62,21 @@ internal sealed class TriggerService
         _storagePath = Path.GetFullPath(storagePath);
         _actions = actions ?? throw new ArgumentNullException(nameof(actions));
         _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
+        _runtimeEvents = runtimeEvents ?? throw new ArgumentNullException(nameof(runtimeEvents));
         _appendLog = appendLog ?? throw new ArgumentNullException(nameof(appendLog));
         _getString = getString ?? (key => key);
+        _createEvaluationContext = createEvaluationContext
+            ?? (triggerEvent => TriggerEvaluationContextFactory.Create(triggerEvent.EventKind, triggerEvent.NotificationLevel));
         _getTriggersEnabled = getTriggersEnabled ?? (() => true);
         _setTriggersEnabled = setTriggersEnabled ?? (_ => { });
         _getTriggerNotificationsEnabled = getTriggerNotificationsEnabled ?? (() => true);
-        _notifications.NotificationRaised += OnNotificationRaised;
+        _runtimeEvents.RuntimeEventRaised += OnRuntimeEventRaised;
         Load();
+    }
+
+    /// <summary>Ensures the singleton instance has been constructed and subscribed to runtime events.</summary>
+    public void Start()
+    {
     }
 
     public bool TriggersEnabled
@@ -186,8 +205,10 @@ internal sealed class TriggerService
             Path.Combine(AppDataPathService.ResolveLocalDataDirectory(), "Triggers.json"),
             ApplicationActionService.Instance,
             NotificationService.Instance,
+            TriggerRuntimeEventHub.Instance,
             LogStorageService.Instance.AppendLog,
             LocalizationService.Instance.GetString,
+            triggerEvent => TriggerEvaluationContextFactory.Create(triggerEvent.EventKind, triggerEvent.NotificationLevel),
             () => triggersEnabledAtStartup,
             _ => { },
             () => AppSettingsService.Instance.TriggerNotificationsEnabled);
@@ -213,27 +234,21 @@ internal sealed class TriggerService
         return _actions.DispatchAsync(kind, action.Value, cancellationToken);
     }
 
-    private async void OnNotificationRaised(object? sender, NotificationRaisedEventArgs args)
+    private async void OnRuntimeEventRaised(object? sender, TriggerRuntimeEvent triggerEvent)
     {
-        if (Interlocked.Exchange(ref _notificationEvaluationActive, 1) == 1)
+        if (Interlocked.Exchange(ref _runtimeEventEvaluationActive, 1) == 1)
         {
             return;
         }
 
         try
         {
-            TriggerEvaluationContext context = new(
-                TriggerEventKind.NotificationRaised,
-                TotalTrafficBytes: 0,
-                WindowTrafficBytes: 0,
-                Runtime: TimeSpan.Zero,
-                SystemTime: TimeOnly.FromDateTime(DateTime.Now),
-                args.Level);
+            TriggerEvaluationContext context = _createEvaluationContext(triggerEvent);
             await EvaluateAsync(context, CancellationToken.None).ConfigureAwait(false);
         }
         finally
         {
-            Volatile.Write(ref _notificationEvaluationActive, 0);
+            Volatile.Write(ref _runtimeEventEvaluationActive, 0);
         }
     }
 

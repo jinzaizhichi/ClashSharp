@@ -1585,6 +1585,44 @@ public sealed class AppResourcePackagingTests
         Assert.DoesNotContain("\"Clash# URL validation timed out\"", notificationService, StringComparison.Ordinal);
     }
 
+    /// <summary>Verifies triggers and notifications communicate through runtime events rather than concrete singletons.</summary>
+    [Fact]
+    public void TriggerNotificationArchitecture_UsesRuntimeEventsAndInjectedBoundaries()
+    {
+        string triggerServicePath = FindSourceFile("ClashSharp", "ClashSharp", "Service", "TriggerService.cs");
+        string notificationServicePath = FindSourceFile("ClashSharp", "ClashSharp", "Service", "NotificationService.cs");
+        string applicationActionServicePath = FindSourceFile("ClashSharp", "ClashSharp", "Service", "ApplicationActionService.cs");
+        string masterControlCodePath = FindSourceFile("ClashSharp", "ClashSharp", "View", "MasterControl.xaml.cs");
+        string triggerRuntimeEventsPath = FindSourceFile("ClashSharp", "ClashSharp", "Service", "TriggerRuntimeEvents.cs");
+        string appCodePath = FindSourceFile("ClashSharp", "ClashSharp", "App.xaml.cs");
+
+        string triggerService = File.ReadAllText(triggerServicePath);
+        string notificationService = File.ReadAllText(notificationServicePath);
+        string applicationActionService = File.ReadAllText(applicationActionServicePath);
+        string masterControlCode = File.ReadAllText(masterControlCodePath);
+        string triggerRuntimeEvents = File.ReadAllText(triggerRuntimeEventsPath);
+        string appCode = File.ReadAllText(appCodePath);
+
+        Assert.Contains("ITriggerRuntimeEventSource", triggerRuntimeEvents, StringComparison.Ordinal);
+        Assert.Contains("ITriggerRuntimeEventPublisher", triggerRuntimeEvents, StringComparison.Ordinal);
+        Assert.Contains("TriggerRuntimeEventHub", triggerRuntimeEvents, StringComparison.Ordinal);
+        Assert.Contains("ITriggerNotificationSink", triggerService, StringComparison.Ordinal);
+        Assert.Contains("ITriggerRuntimeEventSource", triggerService, StringComparison.Ordinal);
+        Assert.Contains("_runtimeEvents.RuntimeEventRaised += OnRuntimeEventRaised", triggerService, StringComparison.Ordinal);
+        Assert.DoesNotContain("private readonly NotificationService", triggerService, StringComparison.Ordinal);
+        Assert.DoesNotContain("_notifications.NotificationRaised", triggerService, StringComparison.Ordinal);
+        Assert.DoesNotContain("NotificationRaisedEventArgs", triggerService, StringComparison.Ordinal);
+        Assert.Contains("ITriggerRuntimeEventPublisher", notificationService, StringComparison.Ordinal);
+        Assert.Contains("_triggerEvents.Publish(new TriggerRuntimeEvent", notificationService, StringComparison.Ordinal);
+        Assert.DoesNotContain("public event EventHandler<NotificationRaisedEventArgs>? NotificationRaised", notificationService, StringComparison.Ordinal);
+        Assert.Contains("ITriggerRuntimeEventPublisher", applicationActionService, StringComparison.Ordinal);
+        Assert.Contains("_triggerEvents.Publish(new TriggerRuntimeEvent", applicationActionService, StringComparison.Ordinal);
+        Assert.DoesNotContain("TriggerService.Instance", applicationActionService, StringComparison.Ordinal);
+        Assert.DoesNotContain("TriggerService.Instance", masterControlCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("NotificationService.Instance.NotifyProxyModeChanged", masterControlCode, StringComparison.Ordinal);
+        Assert.Contains("TriggerService.Instance.Start()", appCode, StringComparison.Ordinal);
+    }
+
     /// <summary>Verifies settings changes are exposed as auditable log records through a startup subscriber.</summary>
     [Fact]
     public void SettingsChanges_AreAuditedThroughSettingsChangeEvents()

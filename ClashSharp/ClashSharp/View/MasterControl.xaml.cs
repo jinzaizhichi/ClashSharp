@@ -66,13 +66,7 @@ public sealed partial class MasterControl : Page
 
     private static async Task OnModeAppliedAsync(ClashSharpMode mode)
     {
-        NotificationService.Instance.NotifyProxyModeChanged(mode);
-        if (mode is ClashSharpMode.RuleTakeover or ClashSharpMode.FullTakeover)
-        {
-            await TriggerService.Instance.EvaluateAsync(
-                TriggerEvaluationContextFactory.Create(TriggerEventKind.ProxyStarted),
-                CancellationToken.None);
-        }
+        await ApplicationActionService.Instance.PublishProxyModeAppliedAsync(mode, CancellationToken.None);
     }
 
     /// <summary>Opens the latency-test dialog and runs a timed progress workflow.</summary>

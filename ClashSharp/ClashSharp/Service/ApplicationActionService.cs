@@ -22,6 +22,7 @@ internal sealed class ApplicationActionService : IApplicationActionDispatcher
         NetworkTakeoverService.Instance,
         MihomoConnectionService.Instance,
         NotificationService.Instance,
+        TriggerRuntimeEventHub.Instance,
         LogStorageService.Instance.AppendLog,
         LocalizationService.Instance.GetString,
         () => App.MainWindow?.Close());
@@ -29,7 +30,8 @@ internal sealed class ApplicationActionService : IApplicationActionDispatcher
     private readonly AppSettingsService _settings;
     private readonly NetworkTakeoverService _takeover;
     private readonly MihomoConnectionService _connections;
-    private readonly NotificationService _notifications;
+    private readonly IApplicationNotificationSink _notifications;
+    private readonly ITriggerRuntimeEventPublisher _triggerEvents;
     private readonly Action<string, string, string, string?> _appendLog;
     private readonly Func<string, string> _getString;
     private readonly Action _exitApplication;
@@ -38,7 +40,8 @@ internal sealed class ApplicationActionService : IApplicationActionDispatcher
         AppSettingsService settings,
         NetworkTakeoverService takeover,
         MihomoConnectionService connections,
-        NotificationService notifications,
+        IApplicationNotificationSink notifications,
+        ITriggerRuntimeEventPublisher triggerEvents,
         Action<string, string, string, string?> appendLog,
         Func<string, string> getString,
         Action exitApplication)
@@ -47,6 +50,7 @@ internal sealed class ApplicationActionService : IApplicationActionDispatcher
         _takeover = takeover ?? throw new ArgumentNullException(nameof(takeover));
         _connections = connections ?? throw new ArgumentNullException(nameof(connections));
         _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
+        _triggerEvents = triggerEvents ?? throw new ArgumentNullException(nameof(triggerEvents));
         _appendLog = appendLog ?? throw new ArgumentNullException(nameof(appendLog));
         _getString = getString ?? throw new ArgumentNullException(nameof(getString));
         _exitApplication = exitApplication ?? throw new ArgumentNullException(nameof(exitApplication));
@@ -72,13 +76,7 @@ internal sealed class ApplicationActionService : IApplicationActionDispatcher
                 ClashSharpMode mode = Enum.TryParse(value, out ClashSharpMode parsedMode) ? parsedMode : _settings.CurrentMode;
                 NetworkTakeoverResult result = _takeover.ApplyMode(mode);
                 _settings.CurrentMode = result.Mode;
-                _notifications.NotifyProxyModeChanged(result.Mode);
-                if (result.Mode is ClashSharpMode.RuleTakeover or ClashSharpMode.FullTakeover)
-                {
-                    await TriggerService.Instance.EvaluateAsync(
-                        TriggerEvaluationContextFactory.Create(TriggerEventKind.ProxyStarted),
-                        cancellationToken).ConfigureAwait(false);
-                }
+                await PublishProxyModeAppliedAsync(result.Mode, cancellationToken).ConfigureAwait(false);
                 break;
             case ApplicationActionKind.CloseConnections:
                 await _connections.CloseAllConnectionsAsync(cancellationToken).ConfigureAwait(false);
@@ -100,6 +98,18 @@ internal sealed class ApplicationActionService : IApplicationActionDispatcher
             default:
                 throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unsupported application action.");
         }
+    }
+
+    public Task PublishProxyModeAppliedAsync(ClashSharpMode mode, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _notifications.NotifyProxyModeChanged(mode);
+        if (mode is ClashSharpMode.RuleTakeover or ClashSharpMode.FullTakeover)
+        {
+            _triggerEvents.Publish(new TriggerRuntimeEvent(TriggerEventKind.ProxyStarted));
+        }
+
+        return Task.CompletedTask;
     }
 
     private static bool ParseBoolean(string value)
