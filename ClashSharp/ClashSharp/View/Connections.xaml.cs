@@ -32,7 +32,8 @@ public sealed partial class Connections : Page
         _viewModel = new(
             new ConnectionsLocalizationAdapter(LocalizationService.Instance),
             new ActiveConnectionClientAdapter(MihomoConnectionService.Instance),
-            new ConnectionLogAdapter(LogStorageService.Instance));
+            new ConnectionLogAdapter(LogStorageService.Instance),
+            MainlandChinaTextDisplayService.Instance.Apply);
 
         InitializeComponent();
         DataContext = _viewModel;

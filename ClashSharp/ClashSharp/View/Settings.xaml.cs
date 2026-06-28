@@ -435,17 +435,10 @@ public sealed partial class Settings : Page
         return await dialog.ShowAsync() is ContentDialogResult.Primary;
     }
 
-    private async void TriggersEnabledToggle_Toggled(object sender, RoutedEventArgs e)
+    private void TriggersEnabledToggle_Toggled(object sender, RoutedEventArgs e)
     {
         if (_isLoadingSettings || _isRevertingRestartSwitch || sender is not ToggleSwitch toggle || toggle.IsOn == _viewModel.TriggersEnabled)
         {
-            return;
-        }
-
-        bool previousValue = _viewModel.TriggersEnabled;
-        if (!await ConfirmRestartRequiredSettingChangeAsync())
-        {
-            RestoreRestartSwitch(toggle, previousValue);
             return;
         }
 
@@ -797,10 +790,8 @@ public sealed partial class Settings : Page
 
     private static async Task ExportLogSqliteAsync(string path, CancellationToken cancellationToken)
     {
-        LogStorageService.Instance.GetStorageSummary();
-        await using FileStream source = File.OpenRead(LogStorageService.Instance.DatabasePath);
-        await using FileStream target = File.Create(path);
-        await source.CopyToAsync(target, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        await Task.Run(() => LogStorageService.Instance.ExportDatabase(path), cancellationToken);
     }
 
     private static bool IsImportableDataPackageScope(ClashDataPackageScope? scope)

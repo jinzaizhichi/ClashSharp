@@ -520,6 +520,22 @@ public sealed class SettingsViewModelTests
         Assert.False(viewModel.TriggerNotificationsEnabled);
     }
 
+    /// <summary>Verifies trigger enablement is a live setting and does not mark the settings page as restart-pending.</summary>
+    [Fact]
+    public void TriggerSettings_DoNotRequireRestart()
+    {
+        FakeSettingsStore store = new()
+        {
+            TriggersEnabled = true,
+        };
+        SettingsViewModel viewModel = new(store, _ => { }, () => { });
+
+        viewModel.TriggersEnabled = false;
+
+        Assert.False(viewModel.IsTriggerEngineRestartPending);
+        Assert.False(viewModel.HasRestartRequiredSettings);
+    }
+
     /// <summary>Verifies tray settings persist close behavior, inactive icon behavior, and visible feature ids.</summary>
     [Fact]
     public void TraySettings_PersistCloseBehaviorAndVisibleFeatures()

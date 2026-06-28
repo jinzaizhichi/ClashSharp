@@ -15,6 +15,7 @@ namespace ClashSharp.Service;
 /// <summary>Creates trigger evaluation contexts from current runtime state.</summary>
 internal static class TriggerEvaluationContextFactory
 {
+    private static readonly TimeSpan RecentTrafficWindow = TimeSpan.FromMinutes(5);
     private static readonly DateTimeOffset StartedAt = DateTimeOffset.Now;
 
     public static TriggerEvaluationContext Create(
@@ -22,10 +23,11 @@ internal static class TriggerEvaluationContextFactory
         NotificationLevel notificationLevel = NotificationLevel.Default)
     {
         TrafficStatisticsSummary summary = LogStorageService.Instance.GetTrafficStatisticsSummary();
+        long windowTrafficBytes = LogStorageService.Instance.GetTrafficBytesSince(DateTimeOffset.UtcNow - RecentTrafficWindow);
         return new TriggerEvaluationContext(
             eventKind,
             summary.TotalUploadBytes + summary.TotalDownloadBytes,
-            WindowTrafficBytes: 0,
+            windowTrafficBytes,
             DateTimeOffset.Now - StartedAt,
             TimeOnly.FromDateTime(DateTime.Now),
             notificationLevel);

@@ -141,6 +141,24 @@ public sealed partial class LogStorageService
         }
     }
 
+    /// <summary>Returns combined upload and download bytes from traffic snapshots at or after <paramref name="cutoff"/>.</summary>
+    /// <param name="cutoff">Inclusive lower bound for traffic snapshots.</param>
+    /// <returns>Total recent traffic bytes.</returns>
+    public long GetTrafficBytesSince(DateTimeOffset cutoff)
+    {
+        lock (_syncLock)
+        {
+            EnsureInitialized();
+
+            using SqliteConnection connection = OpenConnection();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "SELECT COALESCE(SUM(UploadBytes + DownloadBytes), 0) FROM TrafficSnapshots WHERE CreatedAtUnixTime >= $cutoff;";
+            command.Parameters.AddWithValue("$cutoff", cutoff.ToUnixTimeSeconds());
+            object? result = command.ExecuteScalar();
+            return result is null || result == DBNull.Value ? 0 : Convert.ToInt64(result, CultureInfo.InvariantCulture);
+        }
+    }
+
     /// <summary>Returns traffic aggregation rows grouped by profile.</summary>
     /// <param name="limit">Maximum number of rows to return; must be greater than zero.</param>
     /// <returns>Profile traffic rows ordered by total traffic descending.</returns>
@@ -616,6 +634,42 @@ public sealed partial class LogStorageService
         }
     }
 
+    /// <summary>Exports the current SQLite database to a consistent standalone snapshot.</summary>
+    /// <param name="destinationPath">Destination SQLite file path. Must not be null or whitespace.</param>
+    /// <exception cref="ArgumentException"><paramref name="destinationPath"/> is null, empty, or points to the live database.</exception>
+    public void ExportDatabase(string destinationPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+
+        string fullDestinationPath = Path.GetFullPath(destinationPath);
+        if (StringComparer.OrdinalIgnoreCase.Equals(fullDestinationPath, _databasePath))
+        {
+            throw new ArgumentException("Export destination must be different from the live database path.", nameof(destinationPath));
+        }
+
+        string? destinationDirectory = Path.GetDirectoryName(fullDestinationPath);
+        if (!string.IsNullOrWhiteSpace(destinationDirectory))
+        {
+            Directory.CreateDirectory(destinationDirectory);
+        }
+
+        lock (_syncLock)
+        {
+            EnsureInitialized();
+            DeleteExistingDatabaseFiles(fullDestinationPath);
+
+            using SqliteConnection sourceConnection = OpenConnection();
+            SqliteConnectionStringBuilder destinationBuilder = new()
+            {
+                DataSource = fullDestinationPath,
+                Mode = SqliteOpenMode.ReadWriteCreate,
+            };
+            using SqliteConnection destinationConnection = new(destinationBuilder.ToString());
+            destinationConnection.Open();
+            sourceConnection.BackupDatabase(destinationConnection);
+        }
+    }
+
     private IReadOnlyList<LogRecord> GetRecentLogs(int limit, string? source)
     {
         if (limit <= 0)
@@ -674,6 +728,13 @@ public sealed partial class LogStorageService
         return value.Replace(@"\", @"\\", StringComparison.Ordinal)
             .Replace("%", @"\%", StringComparison.Ordinal)
             .Replace("_", @"\_", StringComparison.Ordinal);
+    }
+
+    private static void DeleteExistingDatabaseFiles(string databasePath)
+    {
+        File.Delete(databasePath);
+        File.Delete(databasePath + "-wal");
+        File.Delete(databasePath + "-shm");
     }
 
     /// <summary>Deletes records older than <paramref name="cutoff"/> and compacts the database.</summary>

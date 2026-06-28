@@ -36,11 +36,18 @@ public sealed class ConnectionsViewModelTests
     public async Task RefreshConnectionsAsync_WhenSuccessful_LoadsRows()
     {
         FakeConnectionClient client = new();
-        ConnectionsViewModel viewModel = new(new FakeConnectionsLocalization(), client, new FakeConnectionLog());
+        ConnectionsViewModel viewModel = new(new FakeConnectionsLocalization(), client, new FakeConnectionLog(), text => $"display:{text}");
 
         await viewModel.RefreshConnectionsAsync(CancellationToken.None);
 
-        Assert.Equal(client.Connections, viewModel.Connections);
+        Assert.Equal(client.Connections.Count, viewModel.Connections.Count);
+        Assert.Equal(client.Connections[0], viewModel.Connections[0].Connection);
+        Assert.Equal("display:proc", viewModel.Connections[0].ProcessNameDisplay);
+        Assert.Equal("display:host", viewModel.Connections[0].HostDisplay);
+        Assert.Equal("display:rule,payload", viewModel.Connections[0].RuleDisplay);
+        Assert.Equal("display:proxy", viewModel.Connections[0].ProxyNameDisplay);
+        Assert.Equal("10.0 B", viewModel.Connections[0].UploadDisplay);
+        Assert.Equal("20.0 B", viewModel.Connections[0].DownloadDisplay);
         Assert.Equal("2 active", viewModel.ConnectionStatusText);
     }
 

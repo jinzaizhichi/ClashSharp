@@ -72,6 +72,50 @@ public sealed class ConnectionSamplingServiceTests
         Assert.Equal("12 rows", storage.Logs[1].Detail);
     }
 
+    /// <summary>Verifies cumulative mihomo byte counters are not persisted twice when a connection remains active.</summary>
+    [Fact]
+    public async Task SampleOnceAsync_WhenConnectionCountersAreUnchanged_PersistsOnlyInitialDelta()
+    {
+        FakeConnectionSamplingStorage storage = new();
+        FakeConnectionSamplingSource source = new()
+        {
+            Connections = [CreateConnection("connection-1", 100, 200)],
+        };
+        ConnectionSamplingService service = CreateService(source: source, storage: storage);
+
+        await service.SampleOnceAsync(CancellationToken.None);
+        source.Connections = [CreateConnection("connection-1", 100, 200)];
+        await service.SampleOnceAsync(CancellationToken.None);
+
+        Assert.Equal(2, storage.Snapshots.Count);
+        ActiveConnection firstDelta = Assert.Single(storage.Snapshots[0]);
+        Assert.Equal(100, firstDelta.UploadBytes);
+        Assert.Equal(200, firstDelta.DownloadBytes);
+        Assert.Empty(storage.Snapshots[1]);
+    }
+
+    /// <summary>Verifies repeated active connection samples persist only the byte increase after the first sample.</summary>
+    [Fact]
+    public async Task SampleOnceAsync_WhenConnectionCountersIncrease_PersistsOnlyCounterDelta()
+    {
+        FakeConnectionSamplingStorage storage = new();
+        FakeConnectionSamplingSource source = new()
+        {
+            Connections = [CreateConnection("connection-1", 100, 200)],
+        };
+        ConnectionSamplingService service = CreateService(source: source, storage: storage);
+
+        await service.SampleOnceAsync(CancellationToken.None);
+        source.Connections = [CreateConnection("connection-1", 140, 260)];
+        await service.SampleOnceAsync(CancellationToken.None);
+
+        Assert.Equal(2, storage.Snapshots.Count);
+        ActiveConnection secondDelta = Assert.Single(storage.Snapshots[1]);
+        Assert.Equal("connection-1", secondDelta.Id);
+        Assert.Equal(40, secondDelta.UploadBytes);
+        Assert.Equal(60, secondDelta.DownloadBytes);
+    }
+
     private static ConnectionSamplingService CreateService(
         FakeConnectionSamplingSettings? settings = null,
         FakeConnectionSamplingSource? source = null,
@@ -90,6 +134,20 @@ public sealed class ConnectionSamplingServiceTests
             });
     }
 
+    private static ActiveConnection CreateConnection(string id, long uploadBytes, long downloadBytes)
+    {
+        return new ActiveConnection(
+            id,
+            "process.exe",
+            "example.com",
+            "MATCH",
+            string.Empty,
+            "DIRECT",
+            uploadBytes,
+            downloadBytes,
+            DateTimeOffset.UnixEpoch);
+    }
+
     private sealed class FakeConnectionSamplingSettings : IConnectionSamplingSettings
     {
         public bool IsEnabled { get; init; }
@@ -101,7 +159,7 @@ public sealed class ConnectionSamplingServiceTests
     {
         public Exception? Exception { get; set; }
 
-        public IReadOnlyList<ActiveConnection> Connections { get; init; } = [];
+        public IReadOnlyList<ActiveConnection> Connections { get; set; } = [];
 
         public Task<IReadOnlyList<ActiveConnection>> GetActiveConnectionsAsync(CancellationToken cancellationToken)
         {
@@ -120,8 +178,11 @@ public sealed class ConnectionSamplingServiceTests
 
         public List<ConnectionSamplingLogEntry> Logs { get; } = [];
 
+        public List<IReadOnlyList<ActiveConnection>> Snapshots { get; } = [];
+
         public int AppendConnectionSnapshot(IReadOnlyList<ActiveConnection> connections)
         {
+            Snapshots.Add([.. connections]);
             return InsertedCount;
         }
 

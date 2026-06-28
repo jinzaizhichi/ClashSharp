@@ -1128,14 +1128,13 @@ internal sealed class SettingsViewModel : ObservableObject
         MainlandChinaFeatureMode != _loadedMainlandChinaFeatureMode
         || MainlandChinaUrlBlockingEnabled != _loadedMainlandChinaUrlBlockingEnabled;
 
-    public bool IsTriggerEngineRestartPending => TriggersEnabled != _loadedTriggersEnabled;
+    public bool IsTriggerEngineRestartPending => false;
 
     public bool IsTrayIconRestartPending => TrayUseMonochromeInactiveIcon != _loadedTrayUseMonochromeInactiveIcon;
 
     public bool HasRestartRequiredSettings =>
         IsAppAccentColorRestartPending
         || IsMainlandChinaDisplayRestartPending
-        || IsTriggerEngineRestartPending
         || IsTrayIconRestartPending;
 
     public string RestartRequiredNoticeText => _getString("Settings.RestartRequiredNotice");
@@ -1541,13 +1540,11 @@ internal sealed class SettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(RestartRequiredNoticeText));
     }
 
-    /// <summary>Raises bindable notifications for trigger engine settings that need a restart.</summary>
+    /// <summary>Raises bindable notifications for live trigger engine settings.</summary>
     private void RaiseTriggerRestartStateChanged()
     {
         OnPropertyChanged(nameof(IsTriggerEngineRestartPending));
-        OnPropertyChanged(nameof(HasRestartRequiredSettings));
         OnPropertyChanged(nameof(TriggersEnabledTitleText));
-        OnPropertyChanged(nameof(RestartRequiredNoticeText));
     }
 
     /// <summary>Raises bindable notifications for tray icon settings that need a restart.</summary>

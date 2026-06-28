@@ -43,6 +43,29 @@ public sealed class LogStorageServiceTests
         Assert.Equal(1, row.SampleCount);
     }
 
+    /// <summary>Verifies recent-window traffic can be queried from persisted traffic snapshots.</summary>
+    [Fact]
+    public void GetTrafficBytesSince_ReturnsRecentTrafficSnapshotBytes()
+    {
+        using TempDatabase tempDatabase = new();
+        LogStorageService service = new(tempDatabase.Path, () => "profile-a");
+        ActiveConnection connection = new(
+            "1",
+            "curl",
+            "example.com",
+            "DOMAIN-SUFFIX",
+            "example.com",
+            "Proxy A",
+            100,
+            200,
+            DateTimeOffset.UtcNow);
+
+        service.AppendConnectionSnapshot([connection]);
+
+        long windowBytes = service.GetTrafficBytesSince(DateTimeOffset.UtcNow.AddMinutes(-1));
+        Assert.Equal(300, windowBytes);
+    }
+
     /// <summary>Verifies node health latency can be read by node name for tray status display.</summary>
     [Fact]
     public void GetNodeLatencyMilliseconds_ReturnsStoredLatency()
@@ -79,6 +102,24 @@ public sealed class LogStorageServiceTests
         Assert.Contains("Notification", sources);
         Assert.Contains("Settings", sources);
         Assert.Contains("Trigger", sources);
+    }
+
+    /// <summary>Verifies database export produces a readable snapshot that includes recently appended WAL-mode logs.</summary>
+    [Fact]
+    public void ExportDatabase_CopiesReadableSnapshotWithRecentLogs()
+    {
+        using TempDatabase tempDatabase = new();
+        LogStorageService service = new(tempDatabase.Path, () => "profile-a");
+        service.AppendLog("Info", "Export", "Recent log", "detail");
+        string exportPath = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(tempDatabase.Path)!, "export.sqlite3");
+
+        service.ExportDatabase(exportPath);
+
+        using SqliteConnection connection = new($"Data Source={exportPath};Mode=ReadOnly");
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM Logs WHERE Source = 'Export' AND Message = 'Recent log';";
+        Assert.Equal(1L, Convert.ToInt64(command.ExecuteScalar()));
     }
 
     private sealed class TempDatabase : IDisposable

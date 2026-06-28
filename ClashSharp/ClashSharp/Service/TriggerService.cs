@@ -30,6 +30,7 @@ internal interface ITriggerNotificationSink
 internal sealed class TriggerService
 {
     private const string TriggerLog = "Trigger";
+    private static readonly TimeSpan DefaultPeriodicInterval = TimeSpan.FromSeconds(30);
 
 #if UNIT_TESTS
     public static TriggerService Instance => throw new NotSupportedException("Use explicit TriggerService dependencies in tests.");
@@ -47,10 +48,16 @@ internal sealed class TriggerService
     private readonly Func<bool> _getTriggersEnabled;
     private readonly Action<bool> _setTriggersEnabled;
     private readonly Func<bool> _getTriggerNotificationsEnabled;
+    private readonly Func<TriggerEvaluationContext> _createPeriodicContext;
+    private readonly TimeSpan _periodicInterval;
     private readonly object _syncLock = new();
     private List<TriggerTask> _tasks = [];
     private readonly ConcurrentQueue<TriggerRuntimeEvent> _pendingRuntimeEvents = new();
+    private Timer? _periodicTimer;
+    private bool _periodicStartRequested;
     private int _runtimeEventDrainActive;
+    private int _periodicEvaluationActive;
+    private int _triggerGeneratedNotificationSuppressionDepth;
 
     public TriggerService(
         string storagePath,
@@ -62,7 +69,9 @@ internal sealed class TriggerService
         Func<TriggerRuntimeEvent, TriggerEvaluationContext>? createEvaluationContext = null,
         Func<bool>? getTriggersEnabled = null,
         Action<bool>? setTriggersEnabled = null,
-        Func<bool>? getTriggerNotificationsEnabled = null)
+        Func<bool>? getTriggerNotificationsEnabled = null,
+        TimeSpan? periodicInterval = null,
+        Func<TriggerEvaluationContext>? createPeriodicContext = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(storagePath);
         _storagePath = Path.GetFullPath(storagePath);
@@ -76,6 +85,8 @@ internal sealed class TriggerService
         _getTriggersEnabled = getTriggersEnabled ?? (() => true);
         _setTriggersEnabled = setTriggersEnabled ?? (_ => { });
         _getTriggerNotificationsEnabled = getTriggerNotificationsEnabled ?? (() => true);
+        _periodicInterval = periodicInterval ?? DefaultPeriodicInterval;
+        _createPeriodicContext = createPeriodicContext ?? (() => TriggerEvaluationContextFactory.Create(TriggerEventKind.Periodic));
         _runtimeEvents.RuntimeEventRaised += OnRuntimeEventRaised;
         Load();
     }
@@ -83,12 +94,35 @@ internal sealed class TriggerService
     /// <summary>Ensures the singleton instance has been constructed and subscribed to runtime events.</summary>
     public void Start()
     {
+        lock (_syncLock)
+        {
+            _periodicStartRequested = true;
+        }
+
+        StartPeriodicTimerIfEnabled();
+    }
+
+    /// <summary>Stops periodic trigger evaluation for this service instance.</summary>
+    public void Stop()
+    {
+        StopPeriodicTimer(keepStartRequested: false);
     }
 
     public bool TriggersEnabled
     {
         get => _getTriggersEnabled();
-        set => _setTriggersEnabled(value);
+        set
+        {
+            _setTriggersEnabled(value);
+            if (value)
+            {
+                StartPeriodicTimerIfEnabled();
+            }
+            else
+            {
+                StopPeriodicTimer(keepStartRequested: true);
+            }
+        }
     }
 
     public bool TriggerNotificationsEnabled => _getTriggerNotificationsEnabled();
@@ -231,7 +265,15 @@ internal sealed class TriggerService
                 string.Join(", ", task.Actions.Select(FormatActionForLog)));
             if (TriggerNotificationsEnabled)
             {
-                _notifications.NotifyTriggerFired(task.Name);
+                try
+                {
+                    Interlocked.Increment(ref _triggerGeneratedNotificationSuppressionDepth);
+                    _notifications.NotifyTriggerFired(task.Name);
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _triggerGeneratedNotificationSuppressionDepth);
+                }
             }
         }
 
@@ -254,7 +296,6 @@ internal sealed class TriggerService
 #if !UNIT_TESTS
     private static TriggerService CreateDefault()
     {
-        bool triggersEnabledAtStartup = AppSettingsService.Instance.TriggersEnabled;
         return new TriggerService(
             Path.Combine(AppDataPathService.ResolveLocalDataDirectory(), "Triggers.json"),
             ApplicationActionService.Instance,
@@ -263,8 +304,8 @@ internal sealed class TriggerService
             LogStorageService.Instance.AppendLog,
             LocalizationService.Instance.GetString,
             triggerEvent => TriggerEvaluationContextFactory.Create(triggerEvent.EventKind, triggerEvent.NotificationLevel),
-            () => triggersEnabledAtStartup,
-            _ => { },
+            () => AppSettingsService.Instance.TriggersEnabled,
+            value => AppSettingsService.Instance.TriggersEnabled = value,
             () => AppSettingsService.Instance.TriggerNotificationsEnabled);
     }
 #endif
@@ -291,11 +332,19 @@ internal sealed class TriggerService
             _ => throw new ArgumentOutOfRangeException(nameof(action), action.Kind, "Unsupported trigger action."),
         };
 
-        return _actions.DispatchAsync(kind, action.Value, cancellationToken);
+        return ShouldSuppressNotificationEventsDuringAction(action.Kind)
+            ? ExecuteActionWithNotificationSuppressionAsync(kind, action.Value, cancellationToken)
+            : _actions.DispatchAsync(kind, action.Value, cancellationToken);
     }
 
     private void OnRuntimeEventRaised(object? sender, TriggerRuntimeEvent triggerEvent)
     {
+        if (triggerEvent.EventKind == TriggerEventKind.NotificationRaised
+            && Volatile.Read(ref _triggerGeneratedNotificationSuppressionDepth) > 0)
+        {
+            return;
+        }
+
         _pendingRuntimeEvents.Enqueue(triggerEvent);
         if (Interlocked.Exchange(ref _runtimeEventDrainActive, 1) == 1)
         {
@@ -331,6 +380,89 @@ internal sealed class TriggerService
                 _ = DrainRuntimeEventsAsync();
             }
         }
+    }
+
+    private void OnPeriodicTimer(object? state)
+    {
+        if (!TriggersEnabled || Interlocked.Exchange(ref _periodicEvaluationActive, 1) == 1)
+        {
+            return;
+        }
+
+        _ = EvaluatePeriodicAsync();
+    }
+
+    private void StartPeriodicTimerIfEnabled()
+    {
+        if (!TriggersEnabled || _periodicInterval <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        lock (_syncLock)
+        {
+            if (!_periodicStartRequested)
+            {
+                return;
+            }
+
+            _periodicTimer ??= new Timer(OnPeriodicTimer, null, _periodicInterval, _periodicInterval);
+        }
+    }
+
+    private void StopPeriodicTimer(bool keepStartRequested)
+    {
+        Timer? timer;
+        lock (_syncLock)
+        {
+            if (!keepStartRequested)
+            {
+                _periodicStartRequested = false;
+            }
+
+            timer = _periodicTimer;
+            _periodicTimer = null;
+        }
+
+        timer?.Dispose();
+    }
+
+    private async Task EvaluatePeriodicAsync()
+    {
+        try
+        {
+            TriggerEvaluationContext context = _createPeriodicContext();
+            await EvaluateAsync(context, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            _appendLog("Warning", TriggerLog, GetString("Triggers.Log.RuntimeEventFailed"), exception.Message);
+        }
+        finally
+        {
+            Volatile.Write(ref _periodicEvaluationActive, 0);
+        }
+    }
+
+    private async Task ExecuteActionWithNotificationSuppressionAsync(
+        ApplicationActionKind kind,
+        string value,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            Interlocked.Increment(ref _triggerGeneratedNotificationSuppressionDepth);
+            await _actions.DispatchAsync(kind, value, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _triggerGeneratedNotificationSuppressionDepth);
+        }
+    }
+
+    private static bool ShouldSuppressNotificationEventsDuringAction(TriggerActionKind kind)
+    {
+        return kind is TriggerActionKind.SendNotification or TriggerActionKind.SwitchProxyMode;
     }
 
     private void AppendActionFailureLog(TriggerTask task, TriggerAction action, Exception exception)

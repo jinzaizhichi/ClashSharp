@@ -64,6 +64,9 @@ public sealed partial class ConnectionSamplingService
 
     private readonly Func<string, string> _getString;
 
+    /// <summary>Last observed cumulative byte counters keyed by stable active connection identity.</summary>
+    private readonly Dictionary<string, ConnectionSampleCounters> _lastCountersByConnection = new(StringComparer.Ordinal);
+
     /// <summary>Cancellation source for the running sampling loop.</summary>
     private CancellationTokenSource? _cancellationTokenSource;
 
@@ -175,7 +178,8 @@ public sealed partial class ConnectionSamplingService
         try
         {
             IReadOnlyList<ActiveConnection> connections = await _source.GetActiveConnectionsAsync(cancellationToken).ConfigureAwait(false);
-            int insertedCount = _storage.AppendConnectionSnapshot(connections);
+            IReadOnlyList<ActiveConnection> deltaConnections = CreateDeltaConnections(connections);
+            int insertedCount = _storage.AppendConnectionSnapshot(deltaConnections);
             if (_lastSampleFailed)
             {
                 _storage.AppendLog(
@@ -203,6 +207,65 @@ public sealed partial class ConnectionSamplingService
         }
     }
 
+    /// <summary>Converts cumulative active-connection byte counters into per-sample deltas.</summary>
+    private IReadOnlyList<ActiveConnection> CreateDeltaConnections(IReadOnlyList<ActiveConnection> connections)
+    {
+        List<ActiveConnection> deltaConnections = [];
+        HashSet<string> activeKeys = new(StringComparer.Ordinal);
+
+        lock (_syncLock)
+        {
+            foreach (ActiveConnection connection in connections)
+            {
+                string key = BuildConnectionKey(connection);
+                activeKeys.Add(key);
+
+                long uploadDelta = connection.UploadBytes;
+                long downloadDelta = connection.DownloadBytes;
+                if (_lastCountersByConnection.TryGetValue(key, out ConnectionSampleCounters previousCounters))
+                {
+                    uploadDelta = connection.UploadBytes >= previousCounters.UploadBytes
+                        ? connection.UploadBytes - previousCounters.UploadBytes
+                        : connection.UploadBytes;
+                    downloadDelta = connection.DownloadBytes >= previousCounters.DownloadBytes
+                        ? connection.DownloadBytes - previousCounters.DownloadBytes
+                        : connection.DownloadBytes;
+                }
+
+                _lastCountersByConnection[key] = new ConnectionSampleCounters(connection.UploadBytes, connection.DownloadBytes);
+                if (uploadDelta > 0 || downloadDelta > 0)
+                {
+                    deltaConnections.Add(connection with
+                    {
+                        UploadBytes = Math.Max(0, uploadDelta),
+                        DownloadBytes = Math.Max(0, downloadDelta),
+                    });
+                }
+            }
+
+            List<string> inactiveKeys = [];
+            foreach (string key in _lastCountersByConnection.Keys)
+            {
+                if (!activeKeys.Contains(key))
+                {
+                    inactiveKeys.Add(key);
+                }
+            }
+
+            foreach (string inactiveKey in inactiveKeys)
+            {
+                _lastCountersByConnection.Remove(inactiveKey);
+            }
+        }
+
+        return deltaConnections;
+    }
+
+    private static string BuildConnectionKey(ActiveConnection connection)
+    {
+        return $"{connection.Id}|{connection.StartedAt.UtcTicks.ToString(CultureInfo.InvariantCulture)}";
+    }
+
     private string GetString(string key)
     {
         return _getString(key);
@@ -212,4 +275,6 @@ public sealed partial class ConnectionSamplingService
     {
         return string.Format(CultureInfo.CurrentCulture, GetString(key), args);
     }
+
+    private readonly record struct ConnectionSampleCounters(long UploadBytes, long DownloadBytes);
 }

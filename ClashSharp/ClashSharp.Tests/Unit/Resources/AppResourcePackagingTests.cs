@@ -516,6 +516,18 @@ public sealed class AppResourcePackagingTests
         Assert.Contains("Func<bool>", serviceCode, StringComparison.Ordinal);
     }
 
+    /// <summary>Verifies active connection data stays independent from UI display services.</summary>
+    [Fact]
+    public void ActiveConnectionModel_DoesNotAccessDisplayServices()
+    {
+        string modelPath = FindSourceFile("ClashSharp", "ClashSharp", "Model", "ActiveConnection.cs");
+
+        string modelCode = File.ReadAllText(modelPath);
+
+        Assert.DoesNotContain("ClashSharp.Service", modelCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("MainlandChinaTextDisplayService", modelCode, StringComparison.Ordinal);
+    }
+
     /// <summary>Verifies startup conflict detection resolves user-facing text through an injected localizer.</summary>
     [Fact]
     public void StartupConflictDetectionService_UsesInjectedLocalization()
@@ -1000,8 +1012,9 @@ public sealed class AppResourcePackagingTests
         Assert.Contains("TriggersEnabled", appSettings, StringComparison.Ordinal);
         Assert.Contains("TriggerNotificationsEnabled", triggerService, StringComparison.Ordinal);
         Assert.Contains("CreateDefault", triggerService, StringComparison.Ordinal);
-        Assert.Contains("triggersEnabledAtStartup", triggerService, StringComparison.Ordinal);
-        Assert.DoesNotContain("() => AppSettingsService.Instance.TriggersEnabled", triggerService, StringComparison.Ordinal);
+        Assert.DoesNotContain("triggersEnabledAtStartup", triggerService, StringComparison.Ordinal);
+        Assert.Contains("() => AppSettingsService.Instance.TriggersEnabled", triggerService, StringComparison.Ordinal);
+        Assert.Contains("value => AppSettingsService.Instance.TriggersEnabled = value", triggerService, StringComparison.Ordinal);
         Assert.Contains("Triggers.Log.Fired.Format", triggerService, StringComparison.Ordinal);
         Assert.Contains("SetAllTasksEnabled", triggerService, StringComparison.Ordinal);
         Assert.Contains("CanEditTriggers", triggerView, StringComparison.Ordinal);

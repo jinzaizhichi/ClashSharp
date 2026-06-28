@@ -11,6 +11,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
@@ -85,6 +87,77 @@ internal interface IConnectionLog
     void Append(string level, string category, string message, string? detail);
 }
 
+/// <summary>Bindable display row for one active connection.</summary>
+/// <remarks>
+/// Invariants: Display strings are preformatted and safe for UI binding.
+/// Thread safety: Immutable after construction.
+/// Side effects: None.
+/// </remarks>
+public sealed class ActiveConnectionDisplayRow
+{
+    /// <summary>Initializes a display row.</summary>
+    /// <param name="connection">Raw active connection data.</param>
+    /// <param name="displayTextFilter">UI text filter. Must not be null.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="displayTextFilter"/> is null.</exception>
+    public ActiveConnectionDisplayRow(ActiveConnection connection, Func<string, string> displayTextFilter)
+    {
+        ArgumentNullException.ThrowIfNull(displayTextFilter);
+
+        Connection = connection;
+        ProcessNameDisplay = displayTextFilter(connection.ProcessName);
+        HostDisplay = displayTextFilter(connection.Host);
+        RuleDisplay = displayTextFilter(connection.RawRuleDisplay);
+        ProxyNameDisplay = displayTextFilter(connection.ProxyName);
+        UploadDisplay = FormatByteCount(connection.UploadBytes);
+        DownloadDisplay = FormatByteCount(connection.DownloadBytes);
+    }
+
+    /// <summary>Gets the raw connection represented by this row.</summary>
+    /// <value>Raw active connection data.</value>
+    public ActiveConnection Connection { get; }
+
+    /// <summary>Gets the UI-filtered process name.</summary>
+    /// <value>Process name display text; never null.</value>
+    public string ProcessNameDisplay { get; }
+
+    /// <summary>Gets the UI-filtered host text.</summary>
+    /// <value>Host display text; never null.</value>
+    public string HostDisplay { get; }
+
+    /// <summary>Gets the UI-filtered rule text.</summary>
+    /// <value>Rule display text; never null.</value>
+    public string RuleDisplay { get; }
+
+    /// <summary>Gets the UI-filtered proxy chain text.</summary>
+    /// <value>Proxy display text; never null.</value>
+    public string ProxyNameDisplay { get; }
+
+    /// <summary>Gets the formatted upload byte count.</summary>
+    /// <value>Formatted upload byte count; never null.</value>
+    public string UploadDisplay { get; }
+
+    /// <summary>Gets the formatted download byte count.</summary>
+    /// <value>Formatted download byte count; never null.</value>
+    public string DownloadDisplay { get; }
+
+    /// <summary>Formats a byte count for compact UI display.</summary>
+    /// <param name="bytes">Byte count.</param>
+    /// <returns>Formatted byte count.</returns>
+    private static string FormatByteCount(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        double value = Math.Max(0, bytes);
+        int unitIndex = 0;
+        while (value >= 1024 && unitIndex < units.Length - 1)
+        {
+            value /= 1024;
+            unitIndex++;
+        }
+
+        return value.ToString("N1", CultureInfo.CurrentCulture) + " " + units[unitIndex];
+    }
+}
+
 /// <summary>Bindable view model for active connection monitoring.</summary>
 /// <remarks>
 /// Invariants: <see cref="Connections"/> is never null after construction.
@@ -102,8 +175,11 @@ internal sealed class ConnectionsViewModel : ObservableObject
     /// <summary>Log sink used by persistence and warning messages.</summary>
     private readonly IConnectionLog _log;
 
+    /// <summary>Text filter used for UI-only display policy.</summary>
+    private readonly Func<string, string> _displayTextFilter;
+
     /// <summary>Backing field for <see cref="Connections"/>.</summary>
-    private IReadOnlyList<ActiveConnection> _connections = [];
+    private IReadOnlyList<ActiveConnectionDisplayRow> _connections = [];
 
     /// <summary>Backing field for <see cref="ConnectionStatusText"/>.</summary>
     private string _connectionStatusText = string.Empty;
@@ -116,11 +192,13 @@ internal sealed class ConnectionsViewModel : ObservableObject
     public ConnectionsViewModel(
         IConnectionsLocalization localization,
         IActiveConnectionClient connectionClient,
-        IConnectionLog log)
+        IConnectionLog log,
+        Func<string, string>? displayTextFilter = null)
     {
         _localization = localization ?? throw new ArgumentNullException(nameof(localization));
         _connectionClient = connectionClient ?? throw new ArgumentNullException(nameof(connectionClient));
         _log = log ?? throw new ArgumentNullException(nameof(log));
+        _displayTextFilter = displayTextFilter ?? (static text => text);
         ConnectionStatusText = _localization.GetString("Connections.Status.NotRefreshed");
         RefreshConnectionsCommand = new AsyncRelayCommand(RefreshConnectionsAsync);
         PersistConnectionsCommand = new AsyncRelayCommand(PersistConnectionsAsync);
@@ -154,7 +232,7 @@ internal sealed class ConnectionsViewModel : ObservableObject
 
     /// <summary>Gets active connection rows.</summary>
     /// <value>Active connection rows; never null.</value>
-    public IReadOnlyList<ActiveConnection> Connections
+    public IReadOnlyList<ActiveConnectionDisplayRow> Connections
     {
         get => _connections;
         private set => SetProperty(ref _connections, value);
@@ -196,7 +274,7 @@ internal sealed class ConnectionsViewModel : ObservableObject
         try
         {
             IReadOnlyList<ActiveConnection> connections = await _connectionClient.GetActiveConnectionsAsync(cancellationToken);
-            Connections = connections;
+            Connections = connections.Select(connection => new ActiveConnectionDisplayRow(connection, _displayTextFilter)).ToArray();
             ConnectionStatusText = string.Format(_localization.GetString("Connections.Status.Active.Format"), connections.Count);
             return connections;
         }
@@ -266,8 +344,11 @@ internal sealed class ConnectionsViewModel : ObservableObject
     /// <summary>Closes one active connection from a command parameter.</summary>
     private Task CloseConnectionCommandAsync(object? parameter, CancellationToken cancellationToken)
     {
-        return parameter is ActiveConnection connection
-            ? CloseConnectionAsync(connection, cancellationToken)
-            : Task.CompletedTask;
+        return parameter switch
+        {
+            ActiveConnectionDisplayRow row => CloseConnectionAsync(row.Connection, cancellationToken),
+            ActiveConnection connection => CloseConnectionAsync(connection, cancellationToken),
+            _ => Task.CompletedTask,
+        };
     }
 }
