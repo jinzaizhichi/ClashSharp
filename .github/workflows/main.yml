@@ -10,20 +10,22 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    # 【核心修复】这里强行指定拉取原作者的完整源码仓库，解决你 Fork 仓库没有代码的问题
     - name: Checkout Code
       uses: actions/checkout@v4
       with:
         repository: 'Water-Run/ClashSharp'
-        ref: 'main' # 如果原作者的分支叫 master，这里可以改成 master
+        # 如果依然报错，可以尝试把下面的 'main' 改为 'master' 再试一次
+        ref: 'main' 
         submodules: recursive
         fetch-depth: 0
 
     - name: List Files in Workspace
       shell: pwsh
       run: |
-        echo "=== 根目录文件列表 ==="
+        echo "=== 检查云端根目录文件 ==="
         Get-ChildItem -Path .
+        echo "=== 搜索所有的项目文件 ==="
+        Get-ChildItem -Path . -Filter "*.csproj" -Recurse
 
     - name: Setup .NET SDK
       uses: actions/setup-dotnet@v4
@@ -37,32 +39,32 @@ jobs:
       shell: pwsh
       run: |
         $script = Get-ChildItem -Path . -Filter "Update-Mihomo.ps1" -Recurse | Select-Object -First 1
-        if ($script) {
-            pwsh $script.FullName
-        } else {
-            echo "未找到 Update-Mihomo.ps1 脚本，跳过。"
-        }
+        if ($script) { pwsh $script.FullName }
       continue-on-error: true
 
+    # 【改动点 1】直接利用 dotnet restore 自动扫描目录，不再死磕 .sln
     - name: Restore NuGet Packages
-      shell: pwsh
-      run: |
-        $sln = Get-ChildItem -Path . -Filter "*.sln" -Recurse | Select-Object -First 1
-        if ($sln) {
-            echo "找到解决方案: $($sln.FullName)，开始还原..."
-            msbuild /t:Restore $sln.FullName
-        } else {
-            throw "致命错误：依然没有找到任何 *.sln 文件。"
-        }
+      run: dotnet restore
 
+    # 【改动点 2】动态寻找主程序项目并执行发布编译
     - name: Build Project
       shell: pwsh
       run: |
-        $sln = Get-ChildItem -Path . -Filter "*.sln" -Recurse | Select-Object -First 1
-        msbuild $sln.FullName /p:Configuration=Release /p:Platform=x64 /p:AppxBundle=Never /p:OutDir=${{ github.workspace }}\PublishOutput\
+        # 寻找主要的 .csproj 项目文件
+        $csproj = Get-ChildItem -Path . -Filter "*ClashSharp.csproj" -Recurse | Select-Object -First 1
+        if (-not $csproj) {
+            $csproj = Get-ChildItem -Path . -Filter "*.csproj" -Recurse | Select-Object -First 1
+        }
+        
+        if ($csproj) {
+            echo "找到目标项目: $($csproj.FullName)，开始编译..."
+            dotnet publish $csproj.FullName -c Release -r win-x64 --self-contained true -o ./PublishOutput /p:PublishSingleFile=true /p:PublishTrimmed=false /p:EnableWinUI3ProductionReady=true
+        } else {
+            throw "致命错误：在整个仓库中既没有 .sln，也没有找到任何 .csproj 项目文件！请确认原仓库是否有源码。"
+        }
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ClashSharp-Windows-x64
-        path: ${{ github.workspace }}\PublishOutput\
+        path: ./PublishOutput/
