@@ -1,0 +1,58 @@
+name: Build ClashSharp
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  build-app:
+    # 先用 windows-2022 而不是 windows-latest：
+    # windows-latest 从 2026-06 起逐步切到 VS2026 镜像，还有兼容性问题在修，先避坑
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore ClashSharp/ClashSharp.slnx
+
+      - name: Build (Release, x64)
+        run: dotnet build ClashSharp/ClashSharp.slnx -c Release -p:Platform=x64 --no-restore
+
+      - name: Upload build output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClashSharp-build-output
+          path: ClashSharp/ClashSharp/bin/x64/Release/**
+
+  build-installer:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build Installer (Rust + Slint)
+        working-directory: ClashSharp/Installer
+        run: cargo build --release
+
+      - name: Upload installer binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClashSharp-Installer
+          path: ClashSharp/Installer/target/release/ClashSharp-Installer.exe
