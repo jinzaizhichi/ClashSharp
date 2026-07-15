@@ -2,7 +2,7 @@ name: Build and Package Clash#
 
 on:
   push:
-    branches: [ "main", "master", "dev" ] # 增加常见分支兼容
+    branches: [ "main", "master", "dev" ]
   workflow_dispatch:
 
 jobs:
@@ -10,22 +10,20 @@ jobs:
     runs-on: windows-latest
 
     steps:
+    # 【核心修复】这里强行指定拉取原作者的完整源码仓库，解决你 Fork 仓库没有代码的问题
     - name: Checkout Code
       uses: actions/checkout@v4
       with:
+        repository: 'Water-Run/ClashSharp'
+        ref: 'main' # 如果原作者的分支叫 master，这里可以改成 master
         submodules: recursive
-        fetch-depth: 0 # 完整拉取所有历史和分支
+        fetch-depth: 0
 
-    # 【调试步骤】打印当前目录下的所有文件，看看代码到底被拉到了哪里
     - name: List Files in Workspace
       shell: pwsh
       run: |
-        echo "=== 当前工作目录 ==="
-        Get-Location
         echo "=== 根目录文件列表 ==="
         Get-ChildItem -Path .
-        echo "=== 全盘搜索 .sln 文件 ==="
-        Get-ChildItem -Path . -Filter "*.sln" -Recurse -ErrorAction SilentlyContinue
 
     - name: Setup .NET SDK
       uses: actions/setup-dotnet@v4
@@ -46,7 +44,6 @@ jobs:
         }
       continue-on-error: true
 
-    # 【修复版还原】使用通用 msbuild 还原，它对旧/新项目格式混合的解决方案更包容
     - name: Restore NuGet Packages
       shell: pwsh
       run: |
@@ -55,10 +52,9 @@ jobs:
             echo "找到解决方案: $($sln.FullName)，开始还原..."
             msbuild /t:Restore $sln.FullName
         } else {
-            throw "致命错误：在整个仓库中都没有找到任何 *.sln 解决方案文件，请检查你的 GitHub 仓库分支内是否有代码！"
+            throw "致命错误：依然没有找到任何 *.sln 文件。"
         }
 
-    # 【修复版编译】使用更稳定的 MSBuild 编译 WinUI 3 项目
     - name: Build Project
       shell: pwsh
       run: |
