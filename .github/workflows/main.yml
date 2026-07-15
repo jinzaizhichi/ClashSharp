@@ -1,0 +1,57 @@
+name: Build and Package Clash#
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch: # 允许你手动点击按钮触发
+
+jobs:
+  build:
+    runs-on: windows-latest # 自动使用 GitHub 提供的最新 Windows 编译服务器
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    # 1. 配置现代 .NET 环境（2026年项目主流使用 .NET 8/9/10）
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.x' 
+
+    # 2. 配置微软编译工具链
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    # 3. 核心步骤：下载 Mihomo 内核
+    - name: Download Mihomo Core
+      shell: pwsh
+      run: |
+        # 必须先运行项目自带的内核下载脚本，否则编译出的 exe 只是个空壳
+        ./Tools/Update-Mihomo.ps1
+      continue-on-error: true
+
+    # 4. 还原项目依赖的 NuGet 包（包括你之前找不到的 Windows App SDK）
+    - name: Restore NuGet Packages
+      run: nuget restore Sources/ClashSharp.sln
+
+    # 5. 执行交叉编译，发布为免安装的绿色版单文件
+    - name: Build and Publish App
+      run: |
+        dotnet publish Sources/ClashSharp/ClashSharp.csproj `
+          -c Release `
+          -r win-x64 `
+          --self-contained true `
+          -o ./PublishOutput `
+          /p:PublishSingleFile=true `
+          /p:PublishTrimmed=false `
+          /p:EnableWinUI3ProductionReady=true
+
+    # 6. 将编译好的文件夹打包并上传到 GitHub 供你下载
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ClashSharp-Windows-x64
+        path: ./PublishOutput/
