@@ -3,11 +3,11 @@ name: Build and Package Clash#
 on:
   push:
     branches: [ "main", "master" ]
-  workflow_dispatch: # 允许你手动点击按钮触发
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: windows-latest # 自动使用 GitHub 提供的最新 Windows 编译服务器
+    runs-on: windows-latest
 
     steps:
     - name: Checkout Code
@@ -15,32 +15,52 @@ jobs:
       with:
         submodules: recursive
 
-    # 1. 配置现代 .NET 环境（2026年项目主流使用 .NET 8/9/10）
     - name: Setup .NET SDK
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '8.x' 
+        dotnet-version: '8.x'
 
-    # 2. 配置微软编译工具链
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
-    # 3. 核心步骤：下载 Mihomo 内核
     - name: Download Mihomo Core
       shell: pwsh
       run: |
-        # 必须先运行项目自带的内核下载脚本，否则编译出的 exe 只是个空壳
-        ./Tools/Update-Mihomo.ps1
+        # 寻找并执行内核更新脚本
+        $script = Get-ChildItem -Path . -Filter "Update-Mihomo.ps1" -Recurse | Select-Object -First 1
+        if ($script) {
+            pwsh $script.FullName
+        } else {
+            echo "未找到 Update-Mihomo.ps1 脚本，跳过。"
+        }
       continue-on-error: true
 
-    # 4. 还原项目依赖的 NuGet 包（包括你之前找不到的 Windows App SDK）
+    # 【修复步骤 1】动态寻找并还原解决方案中的所有 NuGet 包
     - name: Restore NuGet Packages
-      run: nuget restore Sources/ClashSharp.sln
-
-    # 5. 执行交叉编译，发布为免安装的绿色版单文件
-    - name: Build and Publish App
+      shell: pwsh
       run: |
-        dotnet publish Sources/ClashSharp/ClashSharp.csproj `
+        $sln = Get-ChildItem -Path . -Filter "*.sln" -Recurse | Select-Object -First 1
+        if ($sln) {
+            echo "自动找到解决方案文件: $($sln.FullName)"
+            nuget restore $sln.FullName
+        } else {
+            echo "未找到 .sln 文件，尝试直接还原项目..."
+            dotnet restore
+        }
+
+    # 【修复步骤 2】动态寻找主项目并执行发布编译
+    - name: Build and Publish App
+      shell: pwsh
+      run: |
+        # 寻找主程序项目（排除 Core 或 Test 目录，优先找名字匹配或最大的项目）
+        $csproj = Get-ChildItem -Path . -Filter "*ClashSharp.csproj" -Recurse | Select-Object -First 1
+        if (-not $csproj) {
+            $csproj = Get-ChildItem -Path . -Filter "*.csproj" -Recurse | Select-Object -First 1
+        }
+        
+        echo "自动确认编译目标项目: $($csproj.FullName)"
+        
+        dotnet publish $csproj.FullName `
           -c Release `
           -r win-x64 `
           --self-contained true `
@@ -49,7 +69,6 @@ jobs:
           /p:PublishTrimmed=false `
           /p:EnableWinUI3ProductionReady=true
 
-    # 6. 将编译好的文件夹打包并上传到 GitHub 供你下载
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
